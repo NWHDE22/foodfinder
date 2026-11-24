@@ -186,45 +186,22 @@ fun SettingsScreen(vm: MainViewModel) {
             }
 
             Divider()
-            // ---------------- TGTG
-            Heading("Too Good To Go")
-            var tgEmail by remember { mutableStateOf(p.tgtgEmail ?: "") }
-            var pin by remember { mutableStateOf("") }
-            var tgMsg by remember { mutableStateOf("") }
-            var polling by remember { mutableStateOf(p.tgtgPollingId) }
-            if (vm.repo.tgtgAuth.loggedIn && tick >= 0) {
-                Text("Verbunden als ${p.tgtgEmail ?: "?"}", style = MaterialTheme.typography.bodyMedium, color = acc.ok)
-                TextButton(onClick = { vm.repo.tgtgAuth.logout(); tick++ }) { Text("Abmelden") }
-            } else {
-                OutlinedTextField(tgEmail, { tgEmail = it.trim() }, label = { Text("E-Mail deines TGTG-Kontos") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
-                Button(onClick = {
-                    scope.launch {
-                        tgMsg = "Anfrage läuft…"
-                        runCatching { vm.repo.tgtgAuth.requestLogin(tgEmail) }
-                            .onSuccess { polling = it; p.tgtgPollingId = it; tgMsg = "Mail ist unterwegs. Gib die PIN aus der Mail ein – oder öffne den Link im Handy-Browser (nicht in der TGTG-App)." }
-                            .onFailure { tgMsg = it.message ?: "Fehler" }
-                    }
-                }, enabled = tgEmail.contains("@"), modifier = Modifier.padding(top = 8.dp)) { Text("Login-Mail anfordern") }
-                if (polling != null) {
-                    OutlinedTextField(pin, { pin = it.filter(Char::isDigit).take(6) }, label = { Text("PIN aus der Mail") }, singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-                    Button(onClick = {
-                        scope.launch {
-                            tgMsg = "Prüfe…"
-                            var ok = false
-                            repeat(if (pin.isBlank()) 6 else 1) {
-                                if (!ok) {
-                                    ok = runCatching { vm.repo.tgtgAuth.complete(polling!!, pin.ifBlank { null }) }.onFailure { tgMsg = it.message ?: "Fehler" }.getOrDefault(false)
-                                    if (!ok && pin.isBlank()) delay(5000)
-                                }
-                            }
-                            if (ok) { tgMsg = "Verbunden"; p.tgtgPollingId = null; polling = null; tick++ } else if (tgMsg == "Prüfe…") tgMsg = "Noch nicht bestätigt. Link geöffnet oder PIN korrekt?"
-                        }
-                    }, modifier = Modifier.padding(top = 8.dp)) { Text(if (pin.isBlank()) "Ich habe den Link geöffnet" else "PIN bestätigen") }
+            // ---------------- TGTG via the official app
+            Heading("Too Good To Go (über die Original-App)")
+            val readerOn = remember(tick) { de.foodfinder.notify.TgtgAppReader.enabled(ctx) }
+            val bags = remember(tick) { p.tgtgBags.count { System.currentTimeMillis() - it.seenAt < 4 * 3600_000L } }
+            Text("Too Good To Go sperrt Dritt-Apps. FoodFinder nutzt deshalb die TGTG-App auf diesem Handy: Was sie dir anzeigt (Tüte, Preis, Warenwert, Abholzeit), wird mitgelesen und unter „Abholen“ nach Ersparnis eingeordnet. Es wird nichts angetippt und keine andere App gelesen.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (readerOn) "Mitlesen aktiv · $bags Tüten aus den letzten 4 Stunden" else "Mitlesen aus",
+                style = MaterialTheme.typography.bodyMedium, color = if (readerOn) acc.ok else MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                FilledTonalButton(onClick = { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) {
+                    Text(if (readerOn) "Mitlesen verwalten" else "Mitlesen einschalten")
                 }
-                if (tgMsg.isNotBlank()) Text(tgMsg, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+                OutlinedButton(onClick = { openApp(ctx, Service.TGTG.packages, "https://www.toogoodtogo.com/de") }) { Text("TGTG öffnen") }
             }
+            if (!readerOn) Text("In den Bedienungshilfen „FoodFinder: Too Good To Go mitlesen“ auswählen und einschalten. Danach einmal die TGTG-App öffnen und durch die Tüten scrollen.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
 
             Divider()
             // ---------------- notifications
@@ -232,7 +209,6 @@ fun SettingsScreen(vm: MainViewModel) {
             var notify by remember { mutableStateOf(p.notifyEnabled) }
             var minSave by remember { mutableStateOf(p.notifyMinSaving.toFloat()) }
             var interval by remember { mutableIntStateOf(p.notifyIntervalMin) }
-            var tgNotify by remember { mutableStateOf(p.notifyTgtg) }
             SwitchRow("Neue Top-Angebote melden", notify, "Prüft im Hintergrund am gewählten bzw. zuletzt bekannten Ort") { notify = it; p.notifyEnabled = it }
             Text("Ab einer Ersparnis von ${eur(minSave.toDouble())}", style = MaterialTheme.typography.bodyMedium)
             Slider(minSave, { minSave = (it * 2).toInt() / 2f }, valueRange = 2f..20f, onValueChangeFinished = { p.notifyMinSaving = minSave.toDouble() })
@@ -242,7 +218,6 @@ fun SettingsScreen(vm: MainViewModel) {
                     FilterChip(interval == mi, { interval = mi; p.notifyIntervalMin = mi; vm.reschedule() }, label = { Text(if (mi < 60) "$mi Min" else "${mi / 60} Std") })
                 }
             }
-            SwitchRow("Too Good To Go: neue Tüten in der Nähe", tgNotify) { tgNotify = it; p.notifyTgtg = it }
 
             Divider()
             Heading("Standard")

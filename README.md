@@ -23,14 +23,14 @@
 
 - **Deals ranked by estimated savings**, for your GPS position or any saved place.
 - **Delivery:** Lieferando, Uber Eats, Wolt.
-- **Pickup and dine-in:** Lieferando (pickup), Wolt (pickup), NeoTaste, Too Good To Go (requires a TGTG e-mail login with PIN).
+- **Pickup and dine-in:** Lieferando (pickup), Wolt (pickup), NeoTaste, Too Good To Go (reads the official TGTG app's screen, see [Setup](#setup)).
 - **Per-restaurant estimate for N persons** (default 2), including minimum order, delivery fee, the best restaurant deal, memberships and vouchers.
 - **Real menus for the top results:** the app loads the actual menu to list individually discounted products and to make the estimate exact instead of guessed.
 - **Vegetarian / vegan filter** that checks individual dishes on the real menus (service labels like "vegetarian" / "VEGAN" plus dish-name rules), not the restaurant's cuisine type. Restaurants stay in the list only if they have matching main dishes, and the bill is estimated from those dishes.
 - **Vouchers and membership status from your own data:** read from your mailbox via IMAP and from the delivery apps' push notifications. Wolt+ gets an expiry reminder.
 - **E-mail login:** Sign in with Google (Gmail) via OAuth (read-only Gmail scope) – or any other provider via IMAP with an app password.
 - **Search and filters:** time-of-day suggestions, recent searches and cuisine synonyms. Filter by cuisine, delivery time, minimum order, delivery fee, rating and service; hide groceries. Sort by savings, total, ETA, distance or rating.
-- **Background checks** (WorkManager, every 30 minutes to 4 hours) with notifications for new top deals and new Too Good To Go bags nearby.
+- **Background checks** (WorkManager, every 30 minutes to 4 hours) with notifications for new top deals.
 - **Ordering stays in the original app** via deep link.
 - **German UI**, light and dark theme, designed as a market-stall chalkboard: slate ground, chalk-white text, chalk-yellow savings in the Cabin Sketch font, and the old price struck through with a chalk stroke.
 - **App icon:** a footprint made of pizza – a wink at the name.
@@ -71,7 +71,7 @@ All of this lives in the **Konten** (accounts) tab.
 | **Gmail** | Tap "Mit Google anmelden". One-time setup: create a Google Cloud project, enable the Gmail API, set the OAuth consent screen to "External" with your address as test user, then publish the app (otherwise the login expires after 7 days; Google shows an "unverified app" notice that you continue through via "Advanced"). Create an OAuth client of type "Desktop app" and paste the Client ID and Client secret into the app. Developers can instead put `google.clientId` and `google.clientSecret` into `local.properties` (not committed) to bake them into their own build. |
 | **Other e-mail providers (IMAP)** | Choose your provider, enter your e-mail address and an **app password**, then tap "Speichern & scannen". Only mails from the supported services (and Amazon regarding Lieferando) from the last 3 weeks are read; vouchers and codes are picked up. The password is stored encrypted with the Android Keystore. |
 | **Notification access** | Tap "Zugriff freigeben" and enable FoodFinder. Deals from the delivery apps' push notifications then feed into the calculation. |
-| **Too Good To Go** | Enter your e-mail, request the login mail, then enter the PIN from that mail (or open the link in your phone's browser, not in the TGTG app). The login may be blocked by Too Good To Go's bot protection (see [Limitations](#limitations-and-honesty-notes)); then bags come in through the official app's push notifications. |
+| **Too Good To Go (via the original app)** | Tap "Mitlesen einschalten" under "Too Good To Go (über die Original-App)", enable the service "FoodFinder: Too Good To Go mitlesen" in Android's accessibility settings, then open the TGTG app once and scroll through the bags. Bags seen within the last 4 hours appear under "Abholen". Bags announced by the TGTG app's push notifications are shown too (notification access). |
 | **Notifications** | Choose the minimum saving that triggers an alert and how often to check (30 minutes to 4 hours). Allow location and notifications on first start. |
 
 ## Install
@@ -120,7 +120,7 @@ app/src/main/java/de/foodfinder
 
 ## Privacy
 
-Everything stays on your device. There is no backend, no analytics and no tracking. Your mailbox is read directly from the phone: via Gmail's API with a read-only Google sign-in (tokens stored encrypted with the Android Keystore), or over IMAP with an app password (also stored encrypted). Only mails from the supported services are processed. Requests go directly from your phone to the services' public web endpoints.
+Everything stays on your device. There is no backend, no analytics and no tracking. Your mailbox is read directly from the phone: via Gmail's API with a read-only Google sign-in (tokens stored encrypted with the Android Keystore), or over IMAP with an app password (also stored encrypted). Only mails from the supported services are processed. Too Good To Go bags are read by an Android accessibility service that is limited to the TGTG app and is read-only: it reads only that app's screen while you browse it, never taps, types or scrolls, and reads no other app. Requests go directly from your phone to the services' public web endpoints.
 
 ## Limitations and honesty notes
 
@@ -129,7 +129,7 @@ Everything stays on your device. There is no backend, no analytics and no tracki
 - **Lieferando item-level discounts are estimated.** For offers like "X % on selected products" without a product list, the value is estimated (half the discount on main dishes), because Lieferando shows the list only in its app.
 - **Wolt checkout banner:** a discount banner seen at Wolt checkout is treated as a possible new-customer offer, not a guaranteed saving.
 - **Estimates are estimates.** Prices, fees and deal conditions can differ at checkout (for example service fees). Always check the final price in the original app.
-- **Too Good To Go blocks third-party apps.** Too Good To Go currently blocks third-party apps with bot protection (HTTP 403). FoodFinder does not try to bypass it. When the login or list is blocked, bags announced by the official TGTG app's push notifications (with notification access enabled) are shown under "Abholen" instead.
+- **Too Good To Go blocks third-party apps.** FoodFinder therefore does not log in to Too Good To Go or call its API, and does not try to bypass its protection. It only reads what the official TGTG app shows (see [Setup](#setup)). The list is only as fresh as the last time the TGTG app was opened, and screen reading may need an update when Too Good To Go changes its app layout.
 
 ## Disclaimer
 
@@ -152,14 +152,14 @@ The code is released under the [GNU General Public License v3.0 or later](LICENS
 ## Funktionen
 
 - Deals nach geschätzter Ersparnis sortiert, für deinen GPS-Standort oder gespeicherte Orte.
-- **Liefern:** Lieferando, Uber Eats, Wolt. **Abholen:** Lieferando (Abholung), Wolt (Abholung), NeoTaste, Too Good To Go (Login per E-Mail und PIN).
+- **Liefern:** Lieferando, Uber Eats, Wolt. **Abholen:** Lieferando (Abholung), Wolt (Abholung), NeoTaste, Too Good To Go (über die Original-App mitlesen).
 - Schätzung pro Restaurant für N Personen (Standard 2), inklusive Mindestbestellwert, Liefergebühr, bestem Restaurant-Deal, Mitgliedschaften und Gutscheinen.
 - Für die vorderen Treffer wird die echte Speisekarte geladen: reduzierte Produkte werden einzeln gezeigt, die Ersparnis ist dann exakt.
 - Filter Vegetarisch / Vegan, der die einzelnen Gerichte auf den echten Speisekarten prüft (Kennzeichnungen der Dienste plus Regeln für Gerichtnamen), nicht die Küchenart des Restaurants. Restaurants bleiben nur in der Liste, wenn sie passende Hauptgerichte haben; die Rechnung wird aus diesen Gerichten geschätzt.
 - Gutscheine und Mitgliedsstatus aus deinem eigenen Postfach (IMAP) und aus den Push-Benachrichtigungen der Liefer-Apps. Erinnerung vor Ablauf von Wolt+.
 - E-Mail-Anmeldung: Mit Google (Gmail) per OAuth anmelden (nur Lesezugriff auf Gmail) – oder ein anderer Anbieter per IMAP mit App-Passwort.
 - Suche mit Vorschlägen nach Tageszeit, letzten Suchen und Küchen-Synonymen. Filter: Küche, Lieferzeit, Mindestbestellwert, Liefergebühr, Bewertung, Dienst, Supermärkte ausblenden. Sortierung nach Ersparnis, Gesamtpreis, Lieferzeit, Entfernung oder Bewertung.
-- Hintergrundprüfung (30 Minuten bis 4 Stunden) mit Benachrichtigung bei neuen Top-Deals und neuen Too-Good-To-Go-Tüten in der Nähe.
+- Hintergrundprüfung (30 Minuten bis 4 Stunden) mit Benachrichtigung bei neuen Top-Deals.
 - Deutsche Oberfläche, heller und dunkler Modus, Design als Marktstand-Kreidetafel. Bestellt wird immer in der Original-App (Deep Link).
 - **App-Icon:** ein Fußabdruck aus Pizza – ein Augenzwinkern zum Namen.
 
@@ -176,7 +176,7 @@ The code is released under the [GNU General Public License v3.0 or later](LICENS
 - **Gmail:** "Mit Google anmelden" antippen. Einmalige Einrichtung: ein Google-Cloud-Projekt anlegen, die Gmail-API aktivieren, den OAuth-Zustimmungsbildschirm auf "Extern" stellen, die eigene Adresse als Testnutzer eintragen und die App dann veröffentlichen (sonst läuft die Anmeldung nach 7 Tagen ab; Google zeigt einen Hinweis "nicht verifizierte App", über "Erweitert" geht es weiter). Einen OAuth-Client vom Typ "Desktopanwendung" anlegen und Client-ID und Client-Geheimnis in die App einfügen. Entwickler können stattdessen `google.clientId` und `google.clientSecret` in `local.properties` eintragen (nicht committen), um sie in den eigenen Build einzubauen.
 - **Andere Anbieter (IMAP):** Anbieter wählen, E-Mail und **App-Passwort** eintragen, "Speichern & scannen". Gelesen werden nur Mails der unterstützten Dienste aus den letzten 3 Wochen. Das Passwort liegt verschlüsselt im Android Keystore.
 - **App-Benachrichtigungen mitlesen:** "Zugriff freigeben", dann FoodFinder aktivieren.
-- **Too Good To Go:** E-Mail eingeben, Login-Mail anfordern, PIN aus der Mail eingeben (oder den Link im Handy-Browser öffnen, nicht in der TGTG-App). Der Login kann durch den Bot-Schutz von Too Good To Go blockiert sein (siehe Grenzen); dann kommen Tüten über die Push-Benachrichtigungen der offiziellen App.
+- **Too Good To Go (über die Original-App):** "Mitlesen einschalten" antippen, dann den Dienst "FoodFinder: Too Good To Go mitlesen" in den Android-Bedienungshilfen aktivieren. Danach die TGTG-App einmal öffnen und durch die Tüten scrollen. Tüten, die in den letzten 4 Stunden gesehen wurden, erscheinen unter "Abholen". Tüten aus den Push-Benachrichtigungen der TGTG-App werden ebenfalls angezeigt (Benachrichtigungszugriff).
 - **Benachrichtigungen:** Ab welcher Ersparnis gemeldet wird und wie oft geprüft wird.
 
 ## Installieren
@@ -197,7 +197,7 @@ APK: `app/build/outputs/apk/release/app-release.apk`. Live-Tests der Datenquelle
 
 ## Datenschutz
 
-Alles bleibt auf dem Gerät. Kein Backend, keine Analyse- oder Tracking-Dienste. Das Postfach wird direkt vom Handy gelesen: per Google-Anmeldung mit reinem Lesezugriff auf Gmail oder per IMAP mit App-Passwort; Zugangsdaten liegen verschlüsselt im Android Keystore. Verarbeitet werden nur Mails der unterstützten Dienste.
+Alles bleibt auf dem Gerät. Kein Backend, keine Analyse- oder Tracking-Dienste. Das Postfach wird direkt vom Handy gelesen: per Google-Anmeldung mit reinem Lesezugriff auf Gmail oder per IMAP mit App-Passwort; Zugangsdaten liegen verschlüsselt im Android Keystore. Verarbeitet werden nur Mails der unterstützten Dienste. Der Bedienungshilfen-Dienst für Too Good To Go ist auf die TGTG-App beschränkt und nur lesend: Er liest den Bildschirm dieser App beim Stöbern, tippt, schreibt und scrollt nie und liest keine andere App.
 
 ## Grenzen
 
@@ -206,7 +206,7 @@ Alles bleibt auf dem Gerät. Kein Backend, keine Analyse- oder Tracking-Dienste.
 - Bei Lieferando sind "-X % auf ausgewählte Produkte" ohne Produktliste geschätzt, weil Lieferando die Liste nur in der App zeigt.
 - Das Wolt-Banner im Checkout wird als mögliches Neukunden-Angebot behandelt, nicht als sichere Ersparnis.
 - Alle Werte sind Schätzungen. Den Endpreis immer in der Original-App prüfen.
-- **Too Good To Go blockiert Drittanbieter-Apps.** Too Good To Go blockiert derzeit Drittanbieter-Apps mit Bot-Schutz (HTTP 403). FoodFinder versucht nicht, das zu umgehen. Wird Login oder Liste blockiert, werden Tüten aus den Push-Benachrichtigungen der offiziellen TGTG-App (mit aktiviertem Benachrichtigungszugriff) stattdessen unter "Abholen" angezeigt.
+- **Too Good To Go blockiert Drittanbieter-Apps.** FoodFinder meldet sich daher nicht bei Too Good To Go an und ruft deren Schnittstelle nicht auf, und versucht nicht, den Schutz zu umgehen. Die App liest nur, was die offizielle TGTG-App anzeigt (siehe Einrichten). Die Liste ist nur so aktuell wie das letzte Öffnen der TGTG-App, und das Auslesen des Bildschirms muss eventuell angepasst werden, wenn Too Good To Go das Layout ändert.
 
 ## Haftungsausschluss
 

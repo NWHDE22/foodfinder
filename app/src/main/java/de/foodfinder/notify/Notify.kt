@@ -120,15 +120,6 @@ class DealWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
                 seen[r.venue.uid] = now
             }
         }
-        // 4) TGTG bags
-        if (p.notifyTgtg && repo.tgtgAuth.loggedIn) runCatching {
-            val res = repo.load(Mode.PICKUP, at, setOf(Service.TGTG))
-            res.venues.filter { (it.itemsAvailable ?: 0) > 0 && it.uid !in seen && (it.distanceM ?: 0) < 3000 }.take(3).forEachIndexed { i, v ->
-                Notifier.post(applicationContext, Notifier.CH_BAGS, 2000 + i, "Tüte verfügbar: ${v.name}",
-                    "${v.itemsAvailable}× für ${v.bagPrice?.let(::eur) ?: "?"} statt ${v.bagValue?.let(::eur) ?: "?"} · Abholung ${v.pickupWindow ?: ""}", v.url)
-                seen[v.uid] = now
-            }
-        }
         p.notified = seen
         return Result.success()
     }

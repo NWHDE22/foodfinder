@@ -70,6 +70,11 @@ class Prefs(ctx: Context) {
         get() = getJson("tgtgPushes", ListSerializer(PushNote.serializer()), emptyList())
         set(v) = putJson("tgtgPushes", ListSerializer(PushNote.serializer()), v.sortedByDescending { it.at }.take(30))
 
+    /** Bags read from the official Too Good To Go app's screen. */
+    var tgtgBags: List<TgtgBag>
+        get() = getJson("tgtgBags", ListSerializer(TgtgBag.serializer()), emptyList())
+        set(v) = putJson("tgtgBags", ListSerializer(TgtgBag.serializer()), v.sortedByDescending { it.seenAt }.take(120))
+
     /** uid -> last notified time */
     var notified: Map<String, Long>
         get() = getJson("notified", MapSerializer(String.serializer(), Long.serializer()), emptyMap())

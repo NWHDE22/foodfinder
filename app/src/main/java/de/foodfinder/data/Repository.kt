@@ -4,8 +4,6 @@ import android.content.Context
 import de.foodfinder.data.sources.LieferandoSource
 import de.foodfinder.data.sources.NeoTasteSource
 import de.foodfinder.data.sources.Source
-import de.foodfinder.data.sources.TgtgAuth
-import de.foodfinder.data.sources.TgtgSource
 import de.foodfinder.data.sources.UberSource
 import de.foodfinder.data.sources.WoltSource
 import de.foodfinder.data.sources.Where
@@ -17,17 +15,15 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.ConcurrentHashMap
 
-class Repository(ctx: Context) {
+class Repository(private val ctx: Context) {
     val prefs = Prefs(ctx)
     val locator = Locator(ctx)
-    val tgtgAuth = TgtgAuth(prefs)
 
     private val sources: Map<Service, Source> = mapOf(
         Service.LIEFERANDO to LieferandoSource,
         Service.UBER_EATS to UberSource,
         Service.WOLT to WoltSource,
         Service.NEOTASTE to NeoTasteSource,
-        Service.TGTG to TgtgSource(tgtgAuth),
     )
 
     private val menuCache = ConcurrentHashMap<String, Pair<Long, List<MenuItem>>>()
@@ -65,18 +61,12 @@ class Repository(ctx: Context) {
         val wanted = mode.servicesFor.filter { it in services }
         val jobs = wanted.map { s ->
             async {
-                if (s == Service.TGTG && !tgtgAuth.loggedIn) return@async s to kotlin.Result.failure<List<Venue>>(IllegalStateException("Nicht angemeldet – in den Einstellungen verbinden"))
+                if (s == Service.TGTG) return@async s to tgtgFromApp()
                 if (s == Service.NEOTASTE && at.city == null) return@async s to kotlin.Result.failure<List<Venue>>(IllegalStateException("Stadt unbekannt"))
                 s to runCatching { withTimeout(35_000) { sources.getValue(s).list(mode, at) } }
             }
         }
-        val results = jobs.awaitAll().map { (s, r) ->
-            // Too Good To Go blocks third-party apps at times; fall back to the bags its own app announced by push
-            if (s == Service.TGTG && r.isFailure) {
-                val push = tgtgFromPushes(at)
-                if (push.isNotEmpty()) s to kotlin.Result.success(push) else s to r
-            } else s to r
-        }
+        val results = jobs.awaitAll()
         val venues = results.flatMap { it.second.getOrDefault(emptyList()) }
         val status = results.map { (s, r) ->
             SourceStatus(s, r.isSuccess, r.getOrNull()?.size ?: 0, r.exceptionOrNull()?.let(::friendly))
@@ -84,9 +74,23 @@ class Repository(ctx: Context) {
         LoadResult(venues, status, at)
     }
 
-    private fun tgtgFromPushes(at: Where): List<Venue> {
-        val since = System.currentTimeMillis() - 6 * 3600_000L
-        return prefs.tgtgPushes.filter { it.at > since }.map { n ->
+    /**
+     * Too Good To Go blocks third-party apps, so its bags come from the official app on this phone:
+     * what its screens showed (read-only reader) plus what it announced by push.
+     */
+    private fun tgtgFromApp(): kotlin.Result<List<Venue>> {
+        val now = System.currentTimeMillis()
+        val seen = prefs.tgtgBags.filter { now - it.seenAt < 4 * 3600_000L }.map { b ->
+            Venue(
+                id = "app-" + b.key, service = Service.TGTG, mode = Mode.PICKUP, name = b.name,
+                distanceM = b.distanceM, url = "https://www.toogoodtogo.com/de",
+                isOpen = b.itemsLeft != 0, pickupWindow = b.pickupWindow, itemsAvailable = b.itemsLeft,
+                bagPrice = b.price, bagValue = b.value, key = b.key,
+                deals = listOf(Deal(DealKind.SURPRISE_BAG, "Überraschungstüte · gesehen in der TGTG-App " +
+                    java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(b.seenAt))),
+            )
+        }
+        val pushed = prefs.tgtgPushes.filter { now - it.at < 6 * 3600_000L && seen.none { v -> it.title.contains(v.name, true) } }.map { n ->
             Venue(
                 id = "push-${n.at}", service = Service.TGTG, mode = Mode.PICKUP,
                 name = n.title.ifBlank { "Too Good To Go" },
@@ -96,6 +100,12 @@ class Repository(ctx: Context) {
                 key = "push",
             )
         }
+        val all = seen + pushed
+        if (all.isNotEmpty()) return kotlin.Result.success(all)
+        val reader = de.foodfinder.notify.TgtgAppReader.enabled(ctx)
+        return kotlin.Result.failure(IllegalStateException(
+            if (reader) "Öffne kurz die Too-Good-To-Go-App und scrolle durch die Tüten – sie erscheinen dann hier"
+            else "In „Konten“ das Mitlesen der Too-Good-To-Go-App einschalten"))
     }
 
     private fun friendly(e: Throwable): String = when (e) {

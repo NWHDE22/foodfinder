@@ -96,6 +96,12 @@ data class Venue(
 }
 
 @Serializable
+data class TgtgBag(
+    val key: String, val name: String, val price: Double, val value: Double?, val pickupWindow: String?,
+    val itemsLeft: Int?, val distanceM: Int?, val seenAt: Long,
+)
+
+@Serializable
 data class PushNote(val service: Service, val title: String, val text: String, val at: Long)
 
 @Serializable
