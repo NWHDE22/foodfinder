@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="19 17 80 80" width="512" height="512">
+  <!-- FoodFinder logo: footprint made of pizza on slate (same artwork as the launcher icon) -->
+  <rect x="19" y="17" width="80" height="80" fill="#18211E"/>
+  <path fill="#F2D46B" stroke="#C99A3A" stroke-width="3" d="M49,47 C41,52 39,64 42,74 C44,82 49,88 56,88 C63,88 66,82 65,75 C64,69 65,64 69,58 C73,52 71,44 63,43 C57,42 53,44 49,47 Z"/>
+  <g fill="#D9625B">
+    <circle cx="51" cy="57" r="3.6"/><circle cx="61" cy="53" r="3"/><circle cx="48" cy="70" r="3.2"/><circle cx="58" cy="64" r="3.4"/><circle cx="56" cy="79" r="3.2"/>
+  </g>
+  <path fill="#8FD3B4" d="M45,62 C47,59 51,60 52,62 C50,64 47,64 45,62 Z"/>
+  <g fill="#F2D46B" stroke="#C99A3A" stroke-width="2.5">
+    <circle cx="45" cy="35" r="6"/><circle cx="56" cy="30.5" r="4.4"/><circle cx="65" cy="32" r="3.8"/><circle cx="72" cy="37" r="3.3"/><circle cx="76" cy="44.5" r="2.8"/>
+  </g>
+</svg>
