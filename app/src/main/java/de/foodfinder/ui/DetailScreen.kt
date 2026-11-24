@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.foodfinder.data.DealOrigin
+import de.foodfinder.data.scopeText
 import de.foodfinder.data.Diet
 import de.foodfinder.data.DietCheck
 import de.foodfinder.data.Mode
@@ -139,6 +140,7 @@ fun DetailScreen(d: DetailState, persons: Int, onPersons: (Int) -> Unit, onBack:
                         Spacer(Modifier.size(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(deal.label, style = MaterialTheme.typography.bodyMedium)
+                            deal.scopeText()?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary) }
                             val sub = listOfNotNull(originLabel(deal), deal.code?.let { "Code $it" }, deal.minOrder?.let { "ab ${eur(it)}" }, if (applied) "eingerechnet" else null)
                             if (sub.isNotEmpty()) Text(sub.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }

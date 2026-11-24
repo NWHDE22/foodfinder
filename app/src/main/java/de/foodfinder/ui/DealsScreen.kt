@@ -62,7 +62,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import de.foodfinder.data.DealOrigin
 import de.foodfinder.data.Diet
+import de.foodfinder.data.scopeText
 import de.foodfinder.data.Filters
 import de.foodfinder.data.Mode
 import de.foodfinder.data.Ranked
@@ -217,10 +219,10 @@ fun DealRow(r: Ranked, persons: Int, onClick: () -> Unit) {
             Text(metaLine(v), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val shown = (e.appliedDeals + v.deals.filter { d -> e.appliedDeals.none { it.label == d.label } }).take(3)
             shown.forEachIndexed { i, d ->
-                Text(d.label + (originLabel(d)?.let { " · $it" } ?: ""), style = MaterialTheme.typography.bodySmall,
+                Text((d.scopeText()?.takeIf { d.origin == DealOrigin.SERVICE } ?: d.label) + (originLabel(d)?.let { " · $it" } ?: ""), style = MaterialTheme.typography.bodySmall,
                     color = if (i < e.appliedDeals.size) acc.saving else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = if (i == 0 && e.savings > 0) FontWeight.Medium else FontWeight.Normal,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = if (i == 0) 4.dp else 0.dp))
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = if (i == 0) 4.dp else 0.dp))
             }
         }
         Spacer(Modifier.size(12.dp))

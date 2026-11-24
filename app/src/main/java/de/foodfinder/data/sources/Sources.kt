@@ -37,6 +37,17 @@ private val groceryWords = listOf("lebensmittel", "geschäfte", "geschaefte", "s
 // ---------------------------------------------------------------- Wolt
 object WoltSource : Source {
     override val service = Service.WOLT
+    private val dynCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, JsonElement>>()
+
+    /** Venue details incl. campaigns; cached so details() and menu() share one request (Wolt rate-limits). */
+    private suspend fun dynamic(v: Venue, method: String): JsonElement {
+        val key = v.key + method
+        dynCache[key]?.takeIf { System.currentTimeMillis() - it.first < 10 * 60_000 }?.let { return it.second }
+        val j = Http.parse(Http.get("https://consumer-api.wolt.com/order-xp/web/v1/venue/slug/${v.key}/dynamic/?lat=${v.lat ?: 0}&lon=${v.lon ?: 0}&selected_delivery_method=$method",
+            mapOf("Accept-Language" to "de-DE,de;q=0.9", "App-Language" to "de")))
+        dynCache[key] = System.currentTimeMillis() to j
+        return j
+    }
 
     override suspend fun list(mode: Mode, at: Where): List<Venue> {
         val j = Http.parse(Http.get("https://consumer-api.wolt.com/v1/pages/restaurants?lat=${at.lat}&lon=${at.lon}"))
@@ -87,14 +98,16 @@ object WoltSource : Source {
 
     override suspend fun details(v: Venue): Venue? {
         val method = if (v.mode == Mode.DELIVERY) "homedelivery" else "takeaway"
-        val j = Http.parse(Http.get("https://consumer-api.wolt.com/order-xp/web/v1/venue/slug/${v.key}/dynamic/?lat=${v.lat ?: 0}&lon=${v.lon ?: 0}&selected_delivery_method=$method",
-            mapOf("Accept-Language" to "de-DE,de;q=0.9", "App-Language" to "de")))
+        val j = dynamic(v, method)
         val venue = j["venue"]
-        val deals = venue["banners"].arr.mapNotNull { b -> b["discount"]["formatted_text"].str?.let { t ->
+        val raw = j["venue_raw"]["discounts"].arr
+        val bannerDeals = venue["banners"].arr.mapNotNull { b -> b["discount"]["formatted_text"].str?.let { t ->
             // "select at checkout" banners are account offers shown to everyone not logged in (often new-customer only)
             if (t.contains("Checkout", true)) Deal(DealKind.OTHER, t.substringBefore(":").trim() + " (Konto-Angebot, evtl. nur Neukunden)")
             else DealParser.parse(t)
         } }.filter { it.kind != DealKind.OTHER || it.label.contains("Konto-Angebot") }
+        val rawDeals = raw.mapNotNull { d -> woltDeal(d) }
+        val deals = rawDeals.ifEmpty { bannerDeals }
         val meanings = HashMap<String, String>()
         fun walk(e: JsonElement?) {
             when (e) {
@@ -114,7 +127,51 @@ object WoltSource : Source {
         )
     }
 
+    /** One Wolt campaign from venue_raw.discounts: effects say what is discounted, conditions say when. */
+    private fun woltDeal(d: JsonElement): Deal? {
+        val title = d["description"]["title"].str ?: return null
+        val eff = d["effects"]; val cond = d["conditions"]
+        val minBasket = cond["basket_contains"].arr.firstNotNullOfOrNull { it["min_amount"].dbl }?.let { it / 100.0 }
+            ?: eff["basket_discount"]["min_amount"].dbl?.let { it / 100.0 }
+        val plusOnly = cond["has_wolt_plus"].bool == true
+        val checkout = title.contains("Checkout", true) || title.contains("Angebote und Ersparnisse", true)
+        if (checkout) return Deal(DealKind.OTHER, title.substringBefore(":").trim() + " (Konto-Angebot, evtl. nur Neukunden)")
+        if (plusOnly) return Deal(DealKind.OTHER, "$title (nur mit Wolt+)")
+        DealParser.parse(title)?.takeIf { it.kind == DealKind.BOGO || it.kind == DealKind.HALF_SECOND }?.let { return it.copy(minOrder = minBasket) }
+        eff["item_discount"].obj?.let { it ->
+            val frac = it["fraction"].dbl
+            return if (frac != null) Deal(DealKind.ITEM_PERCENT, title, percent = frac * 100, minOrder = minBasket)
+            else Deal(DealKind.ITEM_AMOUNT, title, amount = (it["amount_per_item"].dbl ?: 0.0) / 100.0, minOrder = minBasket)
+        }
+        eff["basket_discount"].obj?.let { it ->
+            val frac = it["fraction"].dbl
+            return if (frac != null && frac > 0) Deal(DealKind.ORDER_PERCENT, title, percent = frac * 100, minOrder = minBasket, maxDiscount = it["max_amount"].dbl?.let { m -> m / 100.0 })
+            else {
+                val amount = (it["amount"].dbl ?: 0.0) / 100.0
+                // tiny amounts are price-cap campaigns ("Lunch unter 12 €"), not a saving we can compute
+                if (amount < 0.5) Deal(DealKind.OTHER, title) else Deal(DealKind.ORDER_AMOUNT, title, amount = amount, minOrder = minBasket)
+            }
+        }
+        eff["delivery_discount"].obj?.let { return Deal(DealKind.FREE_DELIVERY, title, minOrder = minBasket) }
+        if (eff["free_items"] != null) return Deal(if (Regex("(?i)2 ?x|2 für 1|1 bezahlen").containsMatchIn(title)) DealKind.BOGO else DealKind.FREE_ITEM, title, minOrder = minBasket)
+        return DealParser.parse(title)
+    }
+
+    /** item id -> discount fraction from the venue's campaigns */
+    private suspend fun woltItemDiscounts(v: Venue): Map<String, Double> = runCatching {
+        val j = dynamic(v, if (v.mode == Mode.DELIVERY) "homedelivery" else "takeaway")
+        val out = HashMap<String, Double>()
+        j["venue_raw"]["discounts"].arr.forEach { d ->
+            if (d["conditions"]["has_wolt_plus"].bool == true) return@forEach
+            val e = d["effects"]["item_discount"]
+            val frac = e["fraction"].dbl ?: return@forEach
+            e["include"]["items"].arr.mapNotNull { it.str }.forEach { out[it] = maxOf(out[it] ?: 0.0, frac) }
+        }
+        out
+    }.getOrDefault(emptyMap())
+
     override suspend fun menu(v: Venue): List<MenuItem> {
+        val disc = woltItemDiscounts(v)
         val j = Http.parse(Http.get("https://consumer-api.wolt.com/consumer-api/consumer-assortment/v1/venues/slug/${v.key}/assortment"))
         val cats = j["categories"].arr.flatMap { c -> c["item_ids"].arr.mapNotNull { it.str }.map { it to (c["name"].str ?: "") } }.toMap()
         return j["items"].arr.mapNotNull { i ->
@@ -124,7 +181,9 @@ object WoltSource : Source {
                 i["dietary_preferences"].forEachString({ _, t -> add(t) })
                 i["tags"].arr.forEach { t -> (t["label"].str ?: t["id"].str)?.let(::add) }
             }.filter { it.contains("veg", true) }
-            MenuItem(i["name"].str ?: "", price / 100.0, orig?.let { it / 100.0 }, i["description"].str ?: "", cats[i["id"].str] ?: "", labels)
+            val frac = disc[i["id"].str ?: ""]
+            if (frac != null && orig == null) MenuItem(i["name"].str ?: "", price / 100.0 * (1 - frac), price / 100.0, i["description"].str ?: "", cats[i["id"].str] ?: "", labels)
+            else MenuItem(i["name"].str ?: "", price / 100.0, orig?.let { it / 100.0 }, i["description"].str ?: "", cats[i["id"].str] ?: "", labels)
         }
     }
 }
@@ -177,6 +236,10 @@ object LieferandoSource : Source {
                 etaMin = if (mode == Mode.DELIVERY) eta["rangeLower"].int else null,
                 etaMax = if (mode == Mode.DELIVERY) eta["rangeUpper"].int else null,
                 deliveryFee = if (mode == Mode.DELIVERY) deliveryFee else null,
+                feeBands = if (mode == Mode.DELIVERY) bands.mapNotNull { b ->
+                    val f = b["fee"].dbl ?: return@mapNotNull null
+                    de.foodfinder.data.FeeBand((b["minimumAmount"].dbl ?: 0.0) / 100.0, f / 100.0)
+                } else emptyList(),
                 minOrder = if (mode == Mode.DELIVERY) minOrder else null,
                 rating = r["rating"]["starRating"].dbl, ratingCount = r["rating"]["count"].int?.toString(),
                 distanceM = r["driveDistanceMeters"].int,
@@ -192,15 +255,84 @@ object LieferandoSource : Source {
         }
     }
 
-    override suspend fun menu(v: Venue): List<MenuItem> {
-        // small CDN file (~100 KB) first; the full menu page (~2 MB) only as fallback
-        runCatching {
-            val j = Http.parse(Http.get("https://globalmenucdn.eu-central-1.production.jet-external.com/${v.key}_de_items.json"))
-            val items = j["Items"].arr.mapNotNull { it ->
-                val price = it["Variations"].arr.firstOrNull()?.get("BasePrice").dbl ?: return@mapNotNull null
-                MenuItem(it["Name"].str ?: "", price, null, it["Description"].str ?: "", "", it["Labels"].arr.mapNotNull { l -> l.str })
+    private class Offer(val description: String, val type: String?, val ids: Set<String>, val percent: Double?, val minSpend: Double?, val prices: Map<String, Double>)
+    private class Catalog(val names: Map<String, String>, val items: List<JsonElement>)
+
+    private val catalogs = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, Catalog>>()
+    private val offerCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<Offer>>>()
+
+    /** Menu file of the CDN; names keyed by item id and by variation id. */
+    private suspend fun catalog(slug: String): Catalog {
+        catalogs[slug]?.takeIf { System.currentTimeMillis() - it.first < 20 * 60_000 }?.let { return it.second }
+        val items = Http.parse(Http.get("https://globalmenucdn.eu-central-1.production.jet-external.com/${slug}_de_items.json"))["Items"].arr
+        val names = HashMap<String, String>()
+        items.forEach { it ->
+            val name = it["Name"].str ?: return@forEach
+            it["Id"].str?.substringBefore("|")?.let { id -> names[id] = name }
+            it["Variations"].arr.forEach { va -> va["Id"].str?.let { id -> names[id] = name + (va["Name"].str?.takeIf { n -> n.isNotBlank() }?.let { n -> " ($n)" } ?: "") } }
+        }
+        return Catalog(names, items).also { catalogs[slug] = System.currentTimeMillis() to it }
+    }
+
+    /** Offers with the concrete products they apply to (the same calls the website makes). */
+    private suspend fun offers(restaurantId: String): List<Offer> {
+        offerCache[restaurantId]?.takeIf { System.currentTimeMillis() - it.first < 20 * 60_000 }?.let { return it.second }
+        val url = "$BASE/consumeroffers/notifications/de?restaurantIds=$restaurantId"
+        val v3 = runCatching { Http.parse(Http.get(url, mapOf("Accept" to "application/json;v=3")))["offerNotifications"].arr }.getOrDefault(emptyList())
+        val v1 = runCatching { Http.parse(Http.get("$url&optionalProperties=offerMenuItems", mapOf("Accept" to "application/json")))["offerNotifications"].arr }.getOrDefault(emptyList())
+        val byId = v1.associateBy { it["offerId"].str ?: "" }
+        val list = (v3.ifEmpty { v1 }).map { o ->
+            val alt = byId[o["offerId"].str ?: ""]
+            val ids = o["discountedItemVariations"].arr.mapNotNull { it["id"].str }.toMutableSet()
+            val prices = HashMap<String, Double>()
+            (alt ?: o)["offerMenuItems"].arr.forEach { mi ->
+                val id = mi["id"].str ?: return@forEach
+                ids += id
+                mi["discount"]["discountedItemPrice"].dbl?.let { prices[id] = it / 100.0 }
             }
-            if (items.isNotEmpty()) return items
+            val pct = o["discountToDisplay"]["percentage"].dbl
+                ?: (alt ?: o)["offerMenuItems"].arr.firstNotNullOfOrNull { it["discount"]["discountPercentage"].dbl }
+            Offer(o["description"].str ?: alt["description"].str ?: "", o["offerType"].str ?: alt["offerType"].str, ids, pct,
+                o["minimumSpendValue"]["value"].dbl?.let { it / 100.0 }, prices)
+        }
+        offerCache[restaurantId] = System.currentTimeMillis() to list
+        return list
+    }
+
+    override suspend fun details(v: Venue): Venue? {
+        val offers = runCatching { offers(v.id) }.getOrDefault(emptyList())
+        if (offers.isEmpty()) return null
+        val names = runCatching { catalog(v.key).names }.getOrDefault(emptyMap())
+        val deals = offers.mapNotNull { o ->
+            val d = DealParser.parse(o.description, offerType = o.type) ?: return@mapNotNull null
+            val items = o.ids.mapNotNull { names[it] }.distinct()
+            d.copy(items = items, minOrder = o.minSpend ?: d.minOrder,
+                percent = d.percent ?: o.percent?.takeIf { d.kind == DealKind.ITEM_PERCENT || d.kind == DealKind.ORDER_PERCENT })
+        }
+        val known = deals.map { it.label }.toSet()
+        return v.copy(deals = deals + v.deals.filter { it.label !in known && deals.none { d -> d.kind == it.kind && d.items.isNotEmpty() } })
+    }
+
+    override suspend fun menu(v: Venue): List<MenuItem> {
+        val cat = runCatching { catalog(v.key) }.getOrNull()
+        if (cat != null && cat.items.isNotEmpty()) {
+            val offers = runCatching { offers(v.id) }.getOrDefault(emptyList())
+            val isBogo = { o: Offer -> o.type?.lowercase()?.startsWith("bogof") == true }
+            val bogo = offers.filter(isBogo).flatMap { it.ids }.toSet()
+            val pct = HashMap<String, Double>(); val fixed = HashMap<String, Double>()
+            offers.filterNot(isBogo).forEach { o ->
+                o.ids.forEach { id -> o.percent?.let { pct[id] = it }; o.prices[id]?.let { fixed[id] = it } }
+            }
+            return cat.items.mapNotNull { it ->
+                val itemId = it["Id"].str?.substringBefore("|") ?: ""
+                val vars = it["Variations"].arr
+                val chosen = vars.firstOrNull { va -> (va["Id"].str ?: "") in pct || (va["Id"].str ?: "") in fixed } ?: vars.firstOrNull() ?: return@mapNotNull null
+                val vid = chosen["Id"].str ?: ""
+                val base = chosen["BasePrice"].dbl ?: return@mapNotNull null
+                val newPrice = fixed[vid] ?: fixed[itemId] ?: (pct[vid] ?: pct[itemId])?.let { p -> base * (1 - p / 100.0) }
+                val labels = it["Labels"].arr.mapNotNull { l -> l.str } + if (vid in bogo || itemId in bogo) listOf("BOGO") else emptyList()
+                MenuItem(it["Name"].str ?: "", newPrice ?: base, if (newPrice != null && newPrice < base) base else null, it["Description"].str ?: "", "", labels)
+            }
         }
         val html = Http.get(v.url)
         val m = Regex("""<script id="__NEXT_DATA__"[^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL).find(html) ?: return emptyList()
@@ -294,9 +426,15 @@ object UberSource : Source {
                     val struck = Regex("""line-through[^>]*>\s*([\d.,]+)\s?€""").find(fmt)?.groupValues?.get(1)
                     val orig0 = Regex("""(?:discounted from|statt|reduziert von)\s*([\d.,]+)\s?€""").find(acc)?.groupValues?.get(1)
                         ?.replace(".", "")?.replace(',', '.')?.toDoubleOrNull()
-                    val orig = orig0 ?: struck?.replace(".", "")?.replace(',', '.')?.toDoubleOrNull()
                     val badge = it["titleBadge"]["accessibilityText"].str ?: ""
-                    val labels = listOfNotNull("VEGAN".takeIf { badge.contains("VEGAN") }, "VEGETARIAN".takeIf { badge.contains("VEGETARIAN") })
+                    val promoType = it["catalogItemAnalyticsData"]["promoType"].str
+                    val labels = listOfNotNull("VEGAN".takeIf { badge.contains("VEGAN") }, "VEGETARIAN".takeIf { badge.contains("VEGETARIAN") },
+                        "BOGO".takeIf { promoType == "BOGA" || promoType == "BOGO" }, "FREE_ITEM".takeIf { promoType == "FREE_ITEM" })
+                    // percent-off items: the original price only appears in the thumbnail label ("10,12 € 14,45 € 30 % sparen")
+                    val thumb = buildList { it["itemThumbnailElements"].forEachString({ _, t -> add(t) }) }.joinToString(" ")
+                    val thumbOrig = if (promoType == "DISCOUNTED_ITEM") Regex("""(\d{1,3},\d{2})\s?€""").findAll(thumb)
+                        .mapNotNull { m -> m.groupValues[1].replace(',', '.').toDoubleOrNull() }.maxOrNull()?.takeIf { o -> o > price / 100.0 + 0.01 } else null
+                    val orig = orig0 ?: struck?.replace(".", "")?.replace(',', '.')?.toDoubleOrNull() ?: thumbOrig
                     out += MenuItem(it["title"].str ?: "", price / 100.0, orig, it["itemDescription"].str ?: "", cat, labels)
                 }
             }

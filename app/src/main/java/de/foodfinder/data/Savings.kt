@@ -84,46 +84,84 @@ object Savings {
             // NeoTaste states the deal's value; a 2-for-1 on a 20 € dish means the dish costs ~20 €
             v.deals.filter { it.label.lowercase().replace(" ", "").contains("2für1") }.maxOfOrNull { it.amount ?: 0.0 }?.let { mp = maxOf(mp, it) }
         }
-        var subtotal = persons * mp
-        var fill = 0.0
-        lines += "$persons × Hauptgericht (ca. ${eur(mp)})" to subtotal
         val delivery = v.mode == Mode.DELIVERY
-        if (delivery && v.minOrder != null && v.minOrder > subtotal) {
-            notes += "Auf Mindestbestellwert ${eur(v.minOrder)} aufgefüllt"
-            fill = v.minOrder - subtotal
-            lines += "Auffüllen auf Mindestbestellwert" to fill
-            subtotal = v.minOrder
+        fun feeFor(sub: Double) = if (!delivery) 0.0 else v.feeBands.filter { sub + 0.001 >= it.minAmount }.maxByOrNull { it.minAmount }?.fee
+            ?: v.feeBands.minByOrNull { it.minAmount }?.fee ?: v.deliveryFee ?: 0.0
+
+        val menu = items ?: emptyList()
+        // products that a deal names: their real prices make the basket, not an average dish
+        val discountedMains = menu.filter { it.discounted && isMain(it.copy(price = it.originalPrice ?: it.price)) }.sortedByDescending { it.saving }
+        val bogoItems = menu.filter { m -> m.labels.any { it == "BOGO" } && m.price >= 3 }.sortedBy { it.price }
+
+        /** One way to order: what goes in the basket, what it would cost without deals, what the deal saves. */
+        class Scenario(val deal: Deal?, val basketLabel: String, val basket: Double, val saving: Double)
+
+        val scenarios = mutableListOf<Scenario>()
+        val avgBasket = persons * mp
+        val avgLabel = "$persons × Hauptgericht (ca. ${eur(mp)})"
+        scenarios += Scenario(null, avgLabel, avgBasket, 0.0)
+        val serviceDeals = v.deals.filter { it.origin == DealOrigin.SERVICE || it.origin == DealOrigin.PUSH }.toMutableList()
+        if (discountedMains.isNotEmpty() && serviceDeals.none { it.kind == DealKind.ITEM_PERCENT || it.kind == DealKind.ITEM_AMOUNT })
+            serviceDeals += Deal(DealKind.ITEM_AMOUNT, "Reduzierte Produkte auf der Karte")
+        for (d in serviceDeals) {
+            when {
+                (d.kind == DealKind.ITEM_PERCENT || d.kind == DealKind.ITEM_AMOUNT) && discountedMains.isNotEmpty() -> {
+                    // order the reduced dishes: the best `persons` of them (cheapest final price first among good savings)
+                    val pick = discountedMains.take(persons)
+                    val basket = pick.sumOf { it.originalPrice ?: it.price } + (persons - pick.size).coerceAtLeast(0) * mp
+                    if (scenarios.none { it.deal?.label?.startsWith("Reduzierte Artikel") == true }) {
+                        val sav = pick.sumOf { it.saving }
+                        val named = Deal(DealKind.ITEM_AMOUNT, "Reduzierte Artikel: " + pick.joinToString(", ") { it.name }, amount = sav, items = pick.map { it.name })
+                        scenarios += Scenario(named, pick.joinToString(" + ") { it.name.take(28) } + if (pick.size < persons) " + ${persons - pick.size} × Hauptgericht" else "",
+                            basket, sav)
+                    }
+                }
+                (d.kind == DealKind.BOGO || d.kind == DealKind.HALF_SECOND) && bogoItems.isNotEmpty() && persons >= 2 -> {
+                    val unit = bogoItems[bogoItems.size / 2].price
+                    val pairs = persons / 2
+                    val basket = pairs * 2 * unit + (persons % 2) * mp
+                    val sav = pairs * unit * if (d.kind == DealKind.BOGO) 1.0 else 0.5
+                    scenarios += Scenario(d, "${pairs * 2} × ${bogoItems[bogoItems.size / 2].name.take(28)}" + if (persons % 2 == 1) " + 1 × Hauptgericht" else "", basket, sav)
+                }
+                else -> {
+                    val sub0 = maxOf(avgBasket, if (delivery) v.minOrder ?: 0.0 else 0.0)
+                    val value = dealValue(d, sub0, feeFor(sub0), mp, persons, discountedMains, null)
+                    if (value > 0.01) scenarios += Scenario(d, avgLabel, avgBasket, value)
+                }
+            }
         }
-        val fee = if (delivery) v.deliveryFee ?: 0.0 else 0.0
+        if (v.deals.any { it.kind == DealKind.ITEM_PERCENT } && discountedMains.isEmpty()) notes += "Rabatt nur auf ausgewählte Produkte, Wert geschätzt"
+
+        fun fillOf(sc: Scenario) = if (delivery && v.minOrder != null && v.minOrder > sc.basket) v.minOrder - sc.basket else 0.0
+        // best = most money saved, minus half of what you would only add to reach the minimum order
+        val best = scenarios.maxByOrNull { it.saving - fillOf(it) * 0.5 }!!
+        val fill = fillOf(best)
+        val subtotal = best.basket + fill
+        lines += best.basketLabel to best.basket
+        if (fill > 0) { notes += "Auf Mindestbestellwert ${eur(v.minOrder!!)} aufgefüllt"; lines += "Auffüllen auf Mindestbestellwert" to fill }
+        val fee = feeFor(subtotal)
         if (delivery) lines += "Liefergebühr" to fee
         val regular = subtotal + fee
 
-        val discountedMains = (items ?: emptyList()).filter { it.discounted && isMain(it.copy(price = it.originalPrice ?: it.price)) && (it.originalPrice ?: it.price) <= mp * 2.5 }.sortedByDescending { it.saving }
-        val dealValues = v.deals.filter { it.origin == DealOrigin.SERVICE || it.origin == DealOrigin.PUSH }.map { d ->
-            d to dealValue(d, subtotal, fee, mp, persons, discountedMains)
-        }.toMutableList()
-        if (discountedMains.isNotEmpty() && v.deals.none { it.kind == DealKind.ITEM_PERCENT || it.kind == DealKind.ITEM_AMOUNT }) {
-            val exact = discountedMains.take(persons).sumOf { it.saving }
-            dealValues += Deal(DealKind.ITEM_AMOUNT, "Reduzierte Produkte auf der Karte") to exact
-        }
-        val best = dealValues.maxByOrNull { it.second }?.takeIf { it.second > 0.01 }
         val applied = mutableListOf<Deal>()
         var saving = 0.0
-        if (best != null) {
-            saving += best.second; applied += best.first
-            lines += "${best.first.label}" to -best.second
-        }
-        if (v.deals.any { it.kind == DealKind.ITEM_PERCENT } && discountedMains.isEmpty() && best?.first?.kind == DealKind.ITEM_PERCENT) {
-            notes += "Rabatt nur auf ausgewählte Produkte, Wert geschätzt"
+        best.deal?.let { d ->
+            saving += best.saving; applied += d
+            lines += d.label to -best.saving
         }
 
         // Memberships: free delivery
-        val freeDeliveryAlready = best?.first?.kind == DealKind.FREE_DELIVERY
+        val freeDeliveryAlready = best.deal?.kind == DealKind.FREE_DELIVERY
         if (delivery && fee > 0 && !freeDeliveryAlready) {
-            if (v.service == Service.LIEFERANDO && membership.lieferandoPlus && v.plusEligible != false && subtotal >= membership.lieferandoPlusMin) {
-                saving += fee; applied += Deal(DealKind.FREE_DELIVERY, "Lieferando Plus (Prime): 0 € Lieferung", origin = DealOrigin.MEMBERSHIP)
-                lines += "Lieferando Plus: Liefergebühr entfällt" to -fee
-                if (v.plusEligible == null) notes += "Plus-Teilnahme des Restaurants nicht bestätigt"
+            if (v.service == Service.LIEFERANDO && membership.lieferandoPlus) {
+                when {
+                    v.plusEligible != true -> notes += "Lieferando Plus: Teilnahme dieses Restaurants nicht bestätigt – Liefergebühr bleibt eingerechnet"
+                    subtotal < membership.lieferandoPlusMin -> notes += "Lieferando Plus erst ab ${eur(membership.lieferandoPlusMin)}"
+                    else -> {
+                        saving += fee; applied += Deal(DealKind.FREE_DELIVERY, "Lieferando Plus (Prime): 0 € Lieferung", origin = DealOrigin.MEMBERSHIP)
+                        lines += "Lieferando Plus: Liefergebühr entfällt" to -fee
+                    }
+                }
             } else if (v.service == Service.WOLT && membership.woltPlusActive() && v.plusEligible == true && subtotal >= membership.woltPlusMin) {
                 saving += fee; applied += Deal(DealKind.FREE_DELIVERY, "Wolt+: 0 € Lieferung", origin = DealOrigin.MEMBERSHIP)
                 lines += "Wolt+: Liefergebühr entfällt" to -fee
@@ -140,7 +178,7 @@ object Savings {
             applied += voucher.first.deal!!.copy(origin = voucher.first.origin, code = voucher.first.code)
             val src = if (voucher.first.origin == DealOrigin.EMAIL) "E-Mail" else "App-Push"
             lines += "Gutschein aus $src${voucher.first.code?.let { " ($it)" } ?: ""}" to -voucher.second
-            if (best != null) notes += "Gutschein evtl. nicht mit Restaurant-Deal kombinierbar"
+            if (best.deal != null) notes += "Gutschein evtl. nicht mit Restaurant-Deal kombinierbar"
         }
         saving = min(saving, regular)
         val total = regular - saving
@@ -149,7 +187,7 @@ object Savings {
         return Estimate(persons, mp, subtotal, fee, saving, total, regular, applied, lines, items != null, notes, score = saving - fill * 0.5)
     }
 
-    private fun dealValue(d: Deal, subtotal: Double, fee: Double, mp: Double, persons: Int, discounted: List<MenuItem>): Double {
+    private fun dealValue(d: Deal, subtotal: Double, fee: Double, mp: Double, persons: Int, discounted: List<MenuItem>, bogoPrice: Double? = null): Double {
         val minOk = subtotal >= (d.minOrder ?: 0.0)
         return when (d.kind) {
             DealKind.ORDER_PERCENT -> if (minOk) min(subtotal * (d.percent ?: 0.0) / 100, d.maxDiscount ?: Double.MAX_VALUE) else 0.0
@@ -160,8 +198,8 @@ object Savings {
             DealKind.ITEM_AMOUNT ->
                 if (discounted.isNotEmpty()) discounted.take(persons).sumOf { it.saving }
                 else (d.amount ?: 0.0) * persons * 0.5
-            DealKind.BOGO -> if (persons >= 2 && minOk) mp * (persons / 2) else 0.0
-            DealKind.HALF_SECOND -> if (persons >= 2) mp * 0.5 * (persons / 2) else 0.0
+            DealKind.BOGO -> if (persons >= 2 && minOk) (bogoPrice ?: mp) * (persons / 2) else 0.0
+            DealKind.HALF_SECOND -> if (persons >= 2) (bogoPrice ?: mp) * 0.5 * (persons / 2) else 0.0
             DealKind.FREE_ITEM -> if (minOk) 3.5 else 0.0
             DealKind.FREE_DELIVERY -> if (minOk) fee else 0.0
             DealKind.FIXED_VALUE -> if (persons >= 2 || d.label.lowercase().let { !it.contains("2für1") && !it.contains("2 für 1") }) d.amount ?: 0.0 else (d.amount ?: 0.0) / 2

@@ -21,8 +21,8 @@ android {
         applicationId = "de.foodfinder"
         minSdk = 28
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.1.1"
+        versionCode = 4
+        versionName = "1.1.2"
         buildConfigField("String", "GOOGLE_CLIENT_ID", buildConfigString(localProps.getProperty("google.clientId")))
         buildConfigField("String", "GOOGLE_CLIENT_SECRET", buildConfigString(localProps.getProperty("google.clientSecret")))
     }

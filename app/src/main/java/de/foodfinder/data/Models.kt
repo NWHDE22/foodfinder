@@ -44,7 +44,32 @@ data class Deal(
     val maxDiscount: Double? = null,
     val origin: DealOrigin = DealOrigin.SERVICE,
     val code: String? = null,
+    /** names of the products the deal applies to, when the service tells us */
+    val items: List<String> = emptyList(),
 )
+
+/** Plain-language scope of a deal: what exactly is discounted. */
+fun Deal.scopeText(): String? {
+    val min = minOrder?.let { " ab ${eur(it)}" } ?: ""
+    val cap = maxDiscount?.let { ", max. ${eur(it)}" } ?: ""
+    val on = if (items.isNotEmpty()) " auf: " + items.take(4).joinToString(", ") + if (items.size > 4) " +${items.size - 4} weitere" else "" else null
+    return when (kind) {
+        DealKind.ORDER_PERCENT -> "${percent?.let { "%.0f".format(it) } ?: "?"} % auf die ganze Bestellung$min$cap"
+        DealKind.ORDER_AMOUNT -> "${amount?.let(::eur) ?: "?"} Rabatt auf die ganze Bestellung$min"
+        DealKind.ITEM_PERCENT -> "${percent?.let { "%.0f".format(it) } ?: "?"} % nur auf ausgewählte Artikel" + (on ?: " (welche, zeigt die Speisekarte)")
+        DealKind.ITEM_AMOUNT -> if (label.startsWith("Reduzierte Artikel")) "zusammen ${amount?.let(::eur) ?: "?"} günstiger (Preise laut Speisekarte)"
+            else "${amount?.let(::eur) ?: "?"} Rabatt nur auf ausgewählte Artikel" + (on ?: "")
+        DealKind.BOGO -> "2 für 1: zweiter Artikel gratis" + (on ?: " – gilt nur für ausgewählte Artikel")
+        DealKind.HALF_SECOND -> "Zweiter Artikel zum halben Preis" + (on ?: " – nur ausgewählte Artikel")
+        DealKind.FREE_ITEM -> "Ein Artikel gratis dazu$min" + (on ?: "")
+        DealKind.FREE_DELIVERY -> "Keine Liefergebühr$min"
+        DealKind.STAMP_CARD -> "Stempelkarte: Rabatt nach mehreren Bestellungen"
+        DealKind.SURPRISE_BAG, DealKind.FIXED_VALUE, DealKind.OTHER -> null
+    }
+}
+
+@Serializable
+data class FeeBand(val minAmount: Double, val fee: Double)
 
 @Serializable
 data class MenuItem(
@@ -83,6 +108,8 @@ data class Venue(
     val isOpen: Boolean = true,
     val isGrocery: Boolean = false,
     val plusEligible: Boolean? = null,
+    /** delivery fee by order value for this address (fee drops with bigger orders) */
+    val feeBands: List<FeeBand> = emptyList(),
     val pickupWindow: String? = null,
     val itemsAvailable: Int? = null,
     val bagPrice: Double? = null,

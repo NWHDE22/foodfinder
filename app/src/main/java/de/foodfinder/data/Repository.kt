@@ -28,9 +28,27 @@ class Repository(private val ctx: Context) {
 
     private val menuCache = ConcurrentHashMap<String, Pair<Long, List<MenuItem>>>()
     private val detailCache = ConcurrentHashMap<String, Pair<Long, Venue>>()
+    @Volatile private var woltPauseUntil = 0L
 
     /** Venue with whatever the detail request added (fees, banner deals). */
-    fun merged(v: Venue): Venue = detailCache[v.uid]?.takeIf { System.currentTimeMillis() - it.first < 20 * 60_000 }?.second ?: v
+    fun merged(v: Venue): Venue = annotate(detailCache[v.uid]?.takeIf { System.currentTimeMillis() - it.first < 20 * 60_000 }?.second ?: v)
+
+    /** Attach the concrete products to item-level deals once the menu is known (discounted / promo-tagged items). */
+    private fun annotate(v: Venue): Venue {
+        val menu = cachedMenu(v) ?: return v
+        val promo = menu.filter { it.discounted }.map { it.name }.distinct()
+        val tagged = { tag: String -> menu.filter { m -> m.labels.any { it.equals(tag, true) } }.map { it.name }.distinct() }
+        val bogo = tagged("BOGO")
+        if (promo.isEmpty() && bogo.isEmpty()) return v
+        return v.copy(deals = v.deals.map { d ->
+            when {
+                d.items.isNotEmpty() -> d
+                (d.kind == DealKind.ITEM_PERCENT || d.kind == DealKind.ITEM_AMOUNT) && promo.isNotEmpty() -> d.copy(items = promo)
+                (d.kind == DealKind.BOGO || d.kind == DealKind.HALF_SECOND) && bogo.isNotEmpty() -> d.copy(items = bogo)
+                else -> d
+            }
+        })
+    }
 
     data class LoadResult(val venues: List<Venue>, val status: List<SourceStatus>, val at: Where)
 
@@ -142,12 +160,21 @@ class Repository(private val ctx: Context) {
         val picks = ranked.filter { it.service != Service.WOLT && it.service in setOf(Service.UBER_EATS, Service.LIEFERANDO) && !it.isGrocery }.take(limit) +
             ranked.filter { it.service == Service.WOLT && !it.isGrocery && it.isOpen }
                 .sortedWith(compareByDescending<Venue> { (it.rating ?: 0.0) >= 4.2 }.thenBy { it.distanceM ?: Int.MAX_VALUE }).take(limit + 8)
+        val woltSem = Semaphore(2)
         picks.filter { cachedMenu(it) == null }
-            .map { v -> async { sem.withPermit {
-                runCatching { withTimeout(15_000) { details(v) } }
-                runCatching { withTimeout(15_000) { menu(v) } }
-                onEach(v)
-            } } }
+            .map { v -> async {
+                val gate = if (v.service == Service.WOLT) woltSem else sem
+                gate.withPermit {
+                    // Wolt rate-limits bursts: go slower and pause after a 429
+                    if (v.service == Service.WOLT) {
+                        if (System.currentTimeMillis() < woltPauseUntil) return@withPermit
+                        kotlinx.coroutines.delay(250)
+                    }
+                    val r = runCatching { withTimeout(15_000) { details(v) }; withTimeout(15_000) { menu(v) } }
+                    if ((r.exceptionOrNull() as? Http.HttpError)?.code == 429 && v.service == Service.WOLT) woltPauseUntil = System.currentTimeMillis() + 5 * 60_000
+                    onEach(v)
+                }
+            } }
             .awaitAll()
     }
 

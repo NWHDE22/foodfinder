@@ -124,6 +124,8 @@ Everything stays on your device. There is no backend, no analytics and no tracki
 
 ## Limitations and honesty notes
 
+- **Lieferando Plus participation is not public.** Whether a restaurant takes part in Lieferando Plus (also via Amazon Prime) is only visible when logged in, so FoodFinder does not subtract the delivery fee for Plus unless participation is confirmed and says so in the bill. Delivery fees themselves are taken per address and order value (Lieferando's fee bands for your location).
+- **Deals name their products.** Item-level deals (2-for-1, % on selected items) list the concrete dishes from Lieferando's offer data, Uber Eats' item promotions and Wolt's campaign data; the bill is then built from those dishes.
 - **No official APIs.** The services do not offer public APIs for this. FoodFinder uses the same public web endpoints as their websites. If a service changes something, the source is shown as unavailable and the app may break until it is updated.
 - **Anonymous public deals only.** Without a login, Lieferando, Wolt and Uber Eats expose only public deals. Personal vouchers come in through e-mail and push notifications.
 - **Lieferando item-level discounts are estimated.** For offers like "X % on selected products" without a product list, the value is estimated (half the discount on main dishes), because Lieferando shows the list only in its app.
@@ -201,6 +203,8 @@ Alles bleibt auf dem Gerät. Kein Backend, keine Analyse- oder Tracking-Dienste.
 
 ## Grenzen
 
+- **Lieferando-Plus-Teilnahme ist nicht öffentlich.** Ob ein Restaurant bei Lieferando Plus (auch über Prime) mitmacht, sieht man nur eingeloggt. FoodFinder zieht die Liefergebühr deshalb nur ab, wenn die Teilnahme bestätigt ist, und schreibt das in die Rechnung. Liefergebühren selbst werden pro Adresse und Bestellwert berechnet (Lieferandos Gebührenstufen für deinen Standort).
+- **Deals nennen ihre Artikel.** Bei Artikel-Deals (2 für 1, % auf ausgewählte Artikel) zeigt FoodFinder die konkreten Gerichte aus den Angebotsdaten von Lieferando, Uber Eats und Wolt und rechnet die Rechnung mit genau diesen Gerichten.
 - Die Dienste haben keine offiziellen Schnittstellen. Die App nutzt dieselben öffentlichen Web-Endpunkte wie die Websites. Ändert ein Dienst etwas, wird die Quelle als nicht erreichbar angezeigt, und die App kann ausfallen, bis sie angepasst ist.
 - Ohne Login sind nur öffentliche Deals sichtbar. Persönliche Gutscheine kommen über E-Mail und App-Pushs dazu.
 - Bei Lieferando sind "-X % auf ausgewählte Produkte" ohne Produktliste geschätzt, weil Lieferando die Liste nur in der App zeigt.
