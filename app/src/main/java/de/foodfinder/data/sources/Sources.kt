@@ -255,7 +255,9 @@ object LieferandoSource : Source {
         }
     }
 
-    private class Offer(val description: String, val type: String?, val ids: Set<String>, val percent: Double?, val minSpend: Double?, val prices: Map<String, Double>)
+    /** ids = products that get cheaper (or free); qualifiers = products you must buy; pct per product as Lieferando states it. */
+    private class Offer(val description: String, val type: String?, val ids: Set<String>, val percent: Double?, val minSpend: Double?,
+                        val prices: Map<String, Double>, val qualifiers: Set<String> = emptySet(), val pctById: Map<String, Double> = emptyMap())
     private class Catalog(val names: Map<String, String>, val items: List<JsonElement>)
 
     private val catalogs = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, Catalog>>()
@@ -285,15 +287,21 @@ object LieferandoSource : Source {
             val alt = byId[o["offerId"].str ?: ""]
             val ids = o["discountedItemVariations"].arr.mapNotNull { it["id"].str }.toMutableSet()
             val prices = HashMap<String, Double>()
+            val qualifiers = HashSet<String>()
+            val pctById = HashMap<String, Double>()
             (alt ?: o)["offerMenuItems"].arr.forEach { mi ->
                 val id = mi["id"].str ?: return@forEach
+                // only "DiscountedItem" gets cheaper; "QualifyingItem" is what you have to buy at full price
+                if (mi["roleType"].str?.equals("DiscountedItem", true) == false) { qualifiers += id; ids -= id; return@forEach }
                 ids += id
+                mi["discount"]["discountPercentage"].dbl?.let { pctById[id] = it }
                 mi["discount"]["discountedItemPrice"].dbl?.let { prices[id] = it / 100.0 }
             }
+            ids.removeAll(qualifiers)
             val pct = o["discountToDisplay"]["percentage"].dbl
                 ?: (alt ?: o)["offerMenuItems"].arr.firstNotNullOfOrNull { it["discount"]["discountPercentage"].dbl }
             Offer(o["description"].str ?: alt["description"].str ?: "", o["offerType"].str ?: alt["offerType"].str, ids, pct,
-                o["minimumSpendValue"]["value"].dbl?.let { it / 100.0 }, prices)
+                o["minimumSpendValue"]["value"].dbl?.let { it / 100.0 }, prices, qualifiers, pctById)
         }
         offerCache[restaurantId] = System.currentTimeMillis() to list
         return list
@@ -306,7 +314,8 @@ object LieferandoSource : Source {
         val deals = offers.mapNotNull { o ->
             val d = DealParser.parse(o.description, offerType = o.type) ?: return@mapNotNull null
             val items = o.ids.mapNotNull { names[it] }.distinct()
-            d.copy(items = items, minOrder = o.minSpend ?: d.minOrder,
+            val requires = o.qualifiers.mapNotNull { names[it] }.distinct()
+            d.copy(items = items, requires = requires, minOrder = o.minSpend ?: d.minOrder,
                 percent = d.percent ?: o.percent?.takeIf { d.kind == DealKind.ITEM_PERCENT || d.kind == DealKind.ORDER_PERCENT })
         }
         val known = deals.map { it.label }.toSet()
@@ -320,8 +329,15 @@ object LieferandoSource : Source {
             val isBogo = { o: Offer -> o.type?.lowercase()?.startsWith("bogof") == true }
             val bogo = offers.filter(isBogo).flatMap { it.ids }.toSet()
             val pct = HashMap<String, Double>(); val fixed = HashMap<String, Double>()
+            val gifts = HashSet<String>(); val qualifiers = HashSet<String>()
             offers.filterNot(isBogo).forEach { o ->
-                o.ids.forEach { id -> o.percent?.let { pct[id] = it }; o.prices[id]?.let { fixed[id] = it } }
+                qualifiers += o.qualifiers
+                o.ids.forEach { id ->
+                    val p = o.pctById[id] ?: o.percent
+                    // 100 % = a free extra product (gift), never "this product costs nothing"
+                    if ((p ?: 0.0) >= 99.0 || o.type.equals("FreeItem", true)) { gifts += id; return@forEach }
+                    p?.let { pct[id] = it }; o.prices[id]?.let { fixed[id] = it }
+                }
             }
             return cat.items.mapNotNull { it ->
                 val itemId = it["Id"].str?.substringBefore("|") ?: ""
@@ -330,7 +346,9 @@ object LieferandoSource : Source {
                 val vid = chosen["Id"].str ?: ""
                 val base = chosen["BasePrice"].dbl ?: return@mapNotNull null
                 val newPrice = fixed[vid] ?: fixed[itemId] ?: (pct[vid] ?: pct[itemId])?.let { p -> base * (1 - p / 100.0) }
-                val labels = it["Labels"].arr.mapNotNull { l -> l.str } + if (vid in bogo || itemId in bogo) listOf("BOGO") else emptyList()
+                val labels = it["Labels"].arr.mapNotNull { l -> l.str } +
+                    listOfNotNull("BOGO".takeIf { vid in bogo || itemId in bogo }, "GIFT".takeIf { vid in gifts || itemId in gifts },
+                        "QUALIFIER".takeIf { vid in qualifiers || itemId in qualifiers })
                 MenuItem(it["Name"].str ?: "", newPrice ?: base, if (newPrice != null && newPrice < base) base else null, it["Description"].str ?: "", "", labels)
             }
         }

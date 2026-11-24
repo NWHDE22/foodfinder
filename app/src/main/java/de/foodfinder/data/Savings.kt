@@ -49,6 +49,10 @@ object DealParser {
 object Savings {
     private val drinkWords = listOf("cola", "fanta", "sprite", "wasser", "bier", "drink", "getränk", "saft", "0,33", "0,5", "1,0 l", "1 l", "dip", "soße", "sauce", "extra", "wein", "riesling", "sekt", "prosecco", "chardonnay", "sauvignon", "0,75", " l ", "flasche")
 
+    /** "Chicki Box (für 2 Personen)" feeds two. */
+    fun portions(i: MenuItem): Int = Regex("""(?i)(?:für|for)\s*(\d)\s*(?:pers|people)""").find(i.name + " " + i.description)
+        ?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(1, 6) ?: 1
+
     fun isMain(i: MenuItem) = i.price in 6.0..35.0 && drinkWords.none { i.name.lowercase().contains(it) }
 
     fun mainPrice(v: Venue, items: List<MenuItem>?): Double {
@@ -90,7 +94,17 @@ object Savings {
 
         val menu = items ?: emptyList()
         // products that a deal names: their real prices make the basket, not an average dish
-        val discountedMains = menu.filter { it.discounted && isMain(it.copy(price = it.originalPrice ?: it.price)) }.sortedByDescending { it.saving }
+        // a dish is never "free" by itself; anything over 90 % off is a data glitch or a gift and handled separately
+        val discountedMains = menu.filter { it.discounted && it.price > 0.5 && it.saving < 0.9 * (it.originalPrice ?: it.price) &&
+            "GIFT" !in it.labels && isMain(it.copy(price = it.originalPrice ?: it.price)) }.sortedByDescending { it.saving }
+        val giftItems = menu.filter { "GIFT" in it.labels }
+        fun byName(names: List<String>) = menu.filter { m -> names.any { n -> n.startsWith(m.name) || m.name.startsWith(n) } }
+        /** pick dishes until everybody has a portion */
+        fun fill(sorted: List<MenuItem>): List<MenuItem> {
+            val out = mutableListOf<MenuItem>(); var fed = 0
+            for (m in sorted) { if (fed >= persons) break; out += m; fed += portions(m) }
+            return out
+        }
         val bogoItems = menu.filter { m -> m.labels.any { it == "BOGO" } && m.price >= 3 }.sortedBy { it.price }
 
         /** One way to order: what goes in the basket, what it would cost without deals, what the deal saves. */
@@ -107,14 +121,29 @@ object Savings {
             when {
                 (d.kind == DealKind.ITEM_PERCENT || d.kind == DealKind.ITEM_AMOUNT) && discountedMains.isNotEmpty() -> {
                     // order the reduced dishes: the best `persons` of them (cheapest final price first among good savings)
-                    val pick = discountedMains.take(persons)
-                    val basket = pick.sumOf { it.originalPrice ?: it.price } + (persons - pick.size).coerceAtLeast(0) * mp
+                    val pick = fill(discountedMains)
+                    val missing = (persons - pick.sumOf { portions(it) }).coerceAtLeast(0)
+                    val basket = pick.sumOf { it.originalPrice ?: it.price } + missing * mp
                     if (scenarios.none { it.deal?.label?.startsWith("Reduzierte Artikel") == true }) {
                         val sav = pick.sumOf { it.saving }
                         val named = Deal(DealKind.ITEM_AMOUNT, "Reduzierte Artikel: " + pick.joinToString(", ") { it.name }, amount = sav, items = pick.map { it.name })
-                        scenarios += Scenario(named, pick.joinToString(" + ") { it.name.take(28) } + if (pick.size < persons) " + ${persons - pick.size} × Hauptgericht" else "",
+                        scenarios += Scenario(named, pick.joinToString(" + ") { it.name.take(28) } + if (missing > 0) " + $missing × Hauptgericht" else "",
                             basket, sav)
                     }
+                }
+                d.kind == DealKind.FREE_ITEM && (giftItems.isNotEmpty() || d.items.isNotEmpty()) -> {
+                    // free extra product: you pay the qualifying dish (or the minimum order) in full, the gift is the saving
+                    val gift = byName(d.items).ifEmpty { giftItems }.maxByOrNull { it.originalPrice ?: it.price } ?: continue
+                    val giftValue = gift.originalPrice ?: gift.price
+                    val required = byName(d.requires).filter { "GIFT" !in it.labels }.minByOrNull { it.price }
+                    val base = if (required != null) listOf(required) else emptyList()
+                    val fed = base.sumOf { portions(it) }
+                    val missing = (persons - fed).coerceAtLeast(0)
+                    // the free product is part of what you get: its value is in the regular price and comes off again
+                    val basket = maxOf(base.sumOf { it.price } + missing * mp, d.minOrder ?: 0.0) + giftValue
+                    val label = (base.joinToString(" + ") { it.name.take(30) }.ifEmpty { "$persons × Hauptgericht" }) +
+                        (if (required != null && missing > 0) " + $missing × Hauptgericht" else "") + " + ${gift.name.take(24)}"
+                    scenarios += Scenario(d, label, basket, giftValue)
                 }
                 (d.kind == DealKind.BOGO || d.kind == DealKind.HALF_SECOND) && bogoItems.isNotEmpty() && persons >= 2 -> {
                     val unit = bogoItems[bogoItems.size / 2].price
@@ -132,6 +161,8 @@ object Savings {
         }
         if (v.deals.any { it.kind == DealKind.ITEM_PERCENT } && discountedMains.isEmpty()) notes += "Rabatt nur auf ausgewählte Produkte, Wert geschätzt"
 
+        scenarios.replaceAll { sc -> if (sc.saving > 0.75 * sc.basket + 0.01 && sc.deal?.kind != DealKind.BOGO)
+            Scenario(sc.deal, sc.basketLabel, sc.basket, 0.75 * sc.basket) else sc }
         fun fillOf(sc: Scenario) = if (delivery && v.minOrder != null && v.minOrder > sc.basket) v.minOrder - sc.basket else 0.0
         // best = most money saved, minus half of what you would only add to reach the minimum order
         val best = scenarios.maxByOrNull { it.saving - fillOf(it) * 0.5 }!!

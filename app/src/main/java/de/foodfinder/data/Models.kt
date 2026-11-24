@@ -46,6 +46,8 @@ data class Deal(
     val code: String? = null,
     /** names of the products the deal applies to, when the service tells us */
     val items: List<String> = emptyList(),
+    /** products you must buy for the deal (e.g. "free nuggets when you buy a Chicki Box") */
+    val requires: List<String> = emptyList(),
 )
 
 /** Plain-language scope of a deal: what exactly is discounted. */
@@ -61,7 +63,8 @@ fun Deal.scopeText(): String? {
             else "${amount?.let(::eur) ?: "?"} Rabatt nur auf ausgewählte Artikel" + (on ?: "")
         DealKind.BOGO -> "2 für 1: zweiter Artikel gratis" + (on ?: " – gilt nur für ausgewählte Artikel")
         DealKind.HALF_SECOND -> "Zweiter Artikel zum halben Preis" + (on ?: " – nur ausgewählte Artikel")
-        DealKind.FREE_ITEM -> "Ein Artikel gratis dazu$min" + (on ?: "")
+        DealKind.FREE_ITEM -> "Gratis dazu" + (if (items.isNotEmpty()) ": " + items.take(2).joinToString(", ") else ": ein Artikel") +
+            (if (requires.isNotEmpty()) " – beim Kauf von " + requires.take(2).joinToString(", ") else "") + min
         DealKind.FREE_DELIVERY -> "Keine Liefergebühr$min"
         DealKind.STAMP_CARD -> "Stempelkarte: Rabatt nach mehreren Bestellungen"
         DealKind.SURPRISE_BAG, DealKind.FIXED_VALUE, DealKind.OTHER -> null
