@@ -86,6 +86,7 @@ object TgtgScreenParser {
             key = name.lowercase() + "|" + (window ?: ""), name = name, price = price, value = value,
             pickupWindow = window, itemsLeft = if (soldOut) 0 else left.find(all)?.groupValues?.get(1)?.toIntOrNull(),
             distanceM = dist, seenAt = now,
+            rating = texts.firstOrNull { Regex("^[1-5][.,][0-9]$").matches(it.trim()) }?.replace(',', '.')?.toDoubleOrNull(),
         )
     }
 

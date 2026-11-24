@@ -124,6 +124,7 @@ Everything stays on your device. There is no backend, no analytics and no tracki
 
 ## Limitations and honesty notes
 
+- **Gentle on the services.** FoodFinder keeps request volume low instead of disguising itself: lists are cached for 5 minutes per place, menus for 20 minutes, menu requests run one after another per service with pauses, and a service that answers "too many requests" (403/429) is left alone for 15 minutes (shown in the list). An empty Uber Eats feed is reported as a temporary refusal, not as "no restaurants".
 - **Lieferando Plus participation is not public.** Whether a restaurant takes part in Lieferando Plus (also via Amazon Prime) is only visible when logged in, so FoodFinder does not subtract the delivery fee for Plus unless participation is confirmed and says so in the bill. Delivery fees themselves are taken per address and order value (Lieferando's fee bands for your location).
 - **Deals name their products.** Item-level deals (2-for-1, % on selected items) list the concrete dishes from Lieferando's offer data, Uber Eats' item promotions and Wolt's campaign data; the bill is then built from those dishes.
 - **No official APIs.** The services do not offer public APIs for this. FoodFinder uses the same public web endpoints as their websites. If a service changes something, the source is shown as unavailable and the app may break until it is updated.
@@ -203,6 +204,7 @@ Alles bleibt auf dem Gerät. Kein Backend, keine Analyse- oder Tracking-Dienste.
 
 ## Grenzen
 
+- **Schonend zu den Diensten.** FoodFinder tarnt sich nicht, sondern fragt wenig: Listen werden 5 Minuten pro Ort zwischengespeichert, Speisekarten 20 Minuten, Speisekarten-Abfragen laufen pro Dienst nacheinander mit Pausen, und ein Dienst, der „zu viele Anfragen“ (403/429) meldet, wird 15 Minuten in Ruhe gelassen (steht in der Liste). Eine leere Uber-Eats-Antwort wird als vorübergehende Ablehnung angezeigt, nicht als „keine Restaurants“.
 - **Lieferando-Plus-Teilnahme ist nicht öffentlich.** Ob ein Restaurant bei Lieferando Plus (auch über Prime) mitmacht, sieht man nur eingeloggt. FoodFinder zieht die Liefergebühr deshalb nur ab, wenn die Teilnahme bestätigt ist, und schreibt das in die Rechnung. Liefergebühren selbst werden pro Adresse und Bestellwert berechnet (Lieferandos Gebührenstufen für deinen Standort).
 - **Deals nennen ihre Artikel.** Bei Artikel-Deals (2 für 1, % auf ausgewählte Artikel) zeigt FoodFinder die konkreten Gerichte aus den Angebotsdaten von Lieferando, Uber Eats und Wolt und rechnet die Rechnung mit genau diesen Gerichten.
 - Die Dienste haben keine offiziellen Schnittstellen. Die App nutzt dieselben öffentlichen Web-Endpunkte wie die Websites. Ändert ein Dienst etwas, wird die Quelle als nicht erreichbar angezeigt, und die App kann ausfallen, bis sie angepasst ist.

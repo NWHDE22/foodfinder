@@ -82,6 +82,7 @@ fun DetailScreen(d: DetailState, persons: Int, onPersons: (Int) -> Unit, onBack:
             item {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Text((listOf(v.service.label) + v.cuisines.take(4)).joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
+                    RatingLine(v, Modifier.padding(vertical = 2.dp))
                     Text(metaLine(v), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     v.address?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     Spacer(Modifier.height(20.dp))

@@ -82,6 +82,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh(m: Mode = _state.value.mode, force: Boolean = false) {
         if (jobs[m]?.isActive == true && !force) return
         jobs[m]?.cancel()
+        if (force) repo.invalidateLists()
         jobs[m] = viewModelScope.launch {
             updateMode(m) { it.copy(loading = true) }
             val at = repo.where(useGps = true)
@@ -103,7 +104,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 else repo.rank(s0.of(m).venues, s0.persons, s0.filters.copy(diet = Diet.ANY, onlyWithDeals = false), s0.query).map { it.venue }
             updateMode(m) { it.copy(enriching = true) }
             var last = 0L
-            repo.enrich(base, limit = if (diet == Diet.ANY) 16 else 35) {
+            repo.enrich(base, limit = if (diet == Diet.ANY) 10 else 25) {
                 val now = System.currentTimeMillis()
                 if (now - last > 700) { last = now; rerank(m) }
             }

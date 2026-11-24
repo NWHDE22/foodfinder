@@ -57,7 +57,7 @@ fun Deal.scopeText(): String? {
         DealKind.ORDER_PERCENT -> "${percent?.let { "%.0f".format(it) } ?: "?"} % auf die ganze Bestellung$min$cap"
         DealKind.ORDER_AMOUNT -> "${amount?.let(::eur) ?: "?"} Rabatt auf die ganze Bestellung$min"
         DealKind.ITEM_PERCENT -> "${percent?.let { "%.0f".format(it) } ?: "?"} % nur auf ausgewählte Artikel" + (on ?: " (welche, zeigt die Speisekarte)")
-        DealKind.ITEM_AMOUNT -> if (label.startsWith("Reduzierte Artikel")) "zusammen ${amount?.let(::eur) ?: "?"} günstiger (Preise laut Speisekarte)"
+        DealKind.ITEM_AMOUNT -> if (label.startsWith("Reduzierte Artikel")) "Reduziert: ${items.joinToString(", ")} – zusammen ${amount?.let(::eur) ?: "?"} günstiger"
             else "${amount?.let(::eur) ?: "?"} Rabatt nur auf ausgewählte Artikel" + (on ?: "")
         DealKind.BOGO -> "2 für 1: zweiter Artikel gratis" + (on ?: " – gilt nur für ausgewählte Artikel")
         DealKind.HALF_SECOND -> "Zweiter Artikel zum halben Preis" + (on ?: " – nur ausgewählte Artikel")
@@ -125,7 +125,7 @@ data class Venue(
 @Serializable
 data class TgtgBag(
     val key: String, val name: String, val price: Double, val value: Double?, val pickupWindow: String?,
-    val itemsLeft: Int?, val distanceM: Int?, val seenAt: Long,
+    val itemsLeft: Int?, val distanceM: Int?, val seenAt: Long, val rating: Double? = null,
 )
 
 @Serializable

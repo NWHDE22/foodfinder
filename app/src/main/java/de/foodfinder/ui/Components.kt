@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -64,7 +65,6 @@ fun metaLine(v: Venue): String = buildList {
         v.pickupWindow?.let { add("Abholung $it") }
         v.itemsAvailable?.let { add("$it übrig") }
     }
-    v.rating?.let { add(String.format(java.util.Locale.GERMANY, "%.1f/5", it)) }
 }.joinToString(" · ")
 
 fun originLabel(d: Deal) = when (d.origin) {
@@ -87,4 +87,23 @@ fun openApp(ctx: Context, packages: List<String>, fallbackUrl: String) {
 fun openRoute(ctx: Context, v: Venue) {
     val q = if (v.lat != null && v.lon != null) "geo:${v.lat},${v.lon}?q=${v.lat},${v.lon}(${Uri.encode(v.name)})" else "geo:0,0?q=${Uri.encode(v.name + " " + (v.address ?: ""))}"
     openUrl(ctx, q)
+}
+
+/** Rating shown on every restaurant: star icon, value out of 5, number of ratings. */
+@Composable
+fun RatingLine(v: Venue, modifier: Modifier = Modifier) {
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        if (v.rating != null && v.rating > 0) {
+            androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Star, contentDescription = "Bewertung",
+                modifier = Modifier.size(14.dp), tint = de.foodfinder.ui.theme.LocalAccents.current.saving)
+            Text(" " + String.format(java.util.Locale.GERMANY, "%.1f", v.rating), style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
+                color = MaterialTheme.colorScheme.onSurface)
+            v.ratingCount?.takeIf { it.isNotBlank() && it != "0" }?.let {
+                Text(" ($it)", style = MaterialTheme.typography.bodySmall, color = color)
+            }
+        } else {
+            Text("Noch keine Bewertung", style = MaterialTheme.typography.bodySmall, color = color)
+        }
+    }
 }

@@ -216,6 +216,7 @@ fun DealRow(r: Ranked, persons: Int, onClick: () -> Unit) {
             Text(v.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             val cuisine = (listOf(v.service.label) + v.cuisines.take(3)).joinToString(" · ")
             Text(cuisine, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            RatingLine(v, Modifier.padding(vertical = 1.dp))
             Text(metaLine(v), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val shown = (e.appliedDeals + v.deals.filter { d -> e.appliedDeals.none { it.label == d.label } }).take(3)
             shown.forEachIndexed { i, d ->

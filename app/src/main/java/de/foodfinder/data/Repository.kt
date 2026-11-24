@@ -28,7 +28,16 @@ class Repository(private val ctx: Context) {
 
     private val menuCache = ConcurrentHashMap<String, Pair<Long, List<MenuItem>>>()
     private val detailCache = ConcurrentHashMap<String, Pair<Long, Venue>>()
-    @Volatile private var woltPauseUntil = 0L
+
+    // ---- polite use of the services: few requests, cached, paced, and a pause when a service says "too many"
+    private val listCache = ConcurrentHashMap<String, Pair<Long, List<Venue>>>()
+    private val pauseUntil = ConcurrentHashMap<Service, Long>()
+    private val LIST_TTL = 5 * 60_000L
+    private fun listKey(s: Service, m: Mode, at: Where) = "${s.name}:${m.name}:${"%.3f".format(java.util.Locale.ROOT, at.lat)}:${"%.3f".format(java.util.Locale.ROOT, at.lon)}"
+    private fun pause(s: Service) { pauseUntil[s] = System.currentTimeMillis() + 15 * 60_000 }
+    fun paused(s: Service) = (pauseUntil[s] ?: 0) > System.currentTimeMillis()
+    /** Pull-to-refresh: drop cached lists, but never more often than once a minute per place. */
+    fun invalidateLists() { listCache.entries.removeIf { System.currentTimeMillis() - it.value.first > 60_000 } }
 
     /** Venue with whatever the detail request added (fees, banner deals). */
     fun merged(v: Venue): Venue = annotate(detailCache[v.uid]?.takeIf { System.currentTimeMillis() - it.first < 20 * 60_000 }?.second ?: v)
@@ -81,7 +90,16 @@ class Repository(private val ctx: Context) {
             async {
                 if (s == Service.TGTG) return@async s to tgtgFromApp()
                 if (s == Service.NEOTASTE && at.city == null) return@async s to kotlin.Result.failure<List<Venue>>(IllegalStateException("Stadt unbekannt"))
-                s to runCatching { withTimeout(35_000) { sources.getValue(s).list(mode, at) } }
+                listCache[listKey(s, mode, at)]?.takeIf { System.currentTimeMillis() - it.first < LIST_TTL }?.let { return@async s to kotlin.Result.success(it.second) }
+                pauseUntil[s]?.takeIf { it > System.currentTimeMillis() }?.let { until ->
+                    return@async s to kotlin.Result.failure<List<Venue>>(IllegalStateException(
+                        "Pausiert bis ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(until)} (Dienst hat Anfragen begrenzt)"))
+                }
+                val r = runCatching { withTimeout(35_000) { sources.getValue(s).list(mode, at) } }
+                    .mapCatching { list -> if (list.isEmpty() && s == Service.UBER_EATS) throw Http.HttpError(403, "Uber Eats liefert gerade keine Restaurants (lehnt Anfragen vorübergehend ab). Später erneut.") else list }
+                r.getOrNull()?.let { listCache[listKey(s, mode, at)] = System.currentTimeMillis() to it }
+                (r.exceptionOrNull() as? Http.HttpError)?.takeIf { it.code == 403 || it.code == 429 }?.let { pause(s) }
+                s to r
             }
         }
         val results = jobs.awaitAll()
@@ -101,7 +119,7 @@ class Repository(private val ctx: Context) {
         val seen = prefs.tgtgBags.filter { now - it.seenAt < 4 * 3600_000L }.map { b ->
             Venue(
                 id = "app-" + b.key, service = Service.TGTG, mode = Mode.PICKUP, name = b.name,
-                distanceM = b.distanceM, url = "https://www.toogoodtogo.com/de",
+                distanceM = b.distanceM, url = "https://www.toogoodtogo.com/de", rating = b.rating,
                 isOpen = b.itemsLeft != 0, pickupWindow = b.pickupWindow, itemsAvailable = b.itemsLeft,
                 bagPrice = b.price, bagValue = b.value, key = b.key,
                 deals = listOf(Deal(DealKind.SURPRISE_BAG, "Überraschungstüte · gesehen in der TGTG-App " +
@@ -154,28 +172,24 @@ class Repository(private val ctx: Context) {
     }
 
     /** Load menus for the most promising venues so item discounts become exact. */
-    suspend fun enrich(ranked: List<Venue>, limit: Int = 16, onEach: (Venue) -> Unit = {}) = coroutineScope {
-        val sem = Semaphore(5)
+    suspend fun enrich(ranked: List<Venue>, limit: Int = 10, onEach: (Venue) -> Unit = {}) = coroutineScope {
         // per service: the current leaders, plus for Wolt (no deals in the list) the best rated nearby
-        val picks = ranked.filter { it.service != Service.WOLT && it.service in setOf(Service.UBER_EATS, Service.LIEFERANDO) && !it.isGrocery }.take(limit) +
+        val picks = ranked.filter { it.service in setOf(Service.UBER_EATS, Service.LIEFERANDO) && !it.isGrocery }.take(limit) +
             ranked.filter { it.service == Service.WOLT && !it.isGrocery && it.isOpen }
-                .sortedWith(compareByDescending<Venue> { (it.rating ?: 0.0) >= 4.2 }.thenBy { it.distanceM ?: Int.MAX_VALUE }).take(limit + 8)
-        val woltSem = Semaphore(2)
-        picks.filter { cachedMenu(it) == null }
-            .map { v -> async {
-                val gate = if (v.service == Service.WOLT) woltSem else sem
-                gate.withPermit {
-                    // Wolt rate-limits bursts: go slower and pause after a 429
-                    if (v.service == Service.WOLT) {
-                        if (System.currentTimeMillis() < woltPauseUntil) return@withPermit
-                        kotlinx.coroutines.delay(250)
-                    }
+                .sortedWith(compareByDescending<Venue> { (it.rating ?: 0.0) >= 4.2 }.thenBy { it.distanceM ?: Int.MAX_VALUE }).take(limit)
+        // each service gets its own queue: one request after another with a short pause, never bursts
+        picks.filter { cachedMenu(it) == null }.groupBy { it.service }.map { (service, list) ->
+            async {
+                for (v in list) {
+                    if (paused(service)) break
                     val r = runCatching { withTimeout(15_000) { details(v) }; withTimeout(15_000) { menu(v) } }
-                    if ((r.exceptionOrNull() as? Http.HttpError)?.code == 429 && v.service == Service.WOLT) woltPauseUntil = System.currentTimeMillis() + 5 * 60_000
+                    val code = (r.exceptionOrNull() as? Http.HttpError)?.code
+                    if (code == 403 || code == 429) { pause(service); break }
                     onEach(v)
+                    kotlinx.coroutines.delay(if (service == Service.WOLT) 900 else 600)
                 }
-            } }
-            .awaitAll()
+            }
+        }.awaitAll()
     }
 
     fun activeVouchers(): List<Voucher> {
