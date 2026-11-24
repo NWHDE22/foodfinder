@@ -32,12 +32,25 @@ val mailPresets = listOf(
     MailPreset("Eigener Server", "", hint = "IMAP-Server deines Anbieters (SSL, Port 993)"),
 )
 
+internal val mailSenders = mapOf(
+    "lieferando" to Service.LIEFERANDO, "just-eat" to Service.LIEFERANDO, "takeaway" to Service.LIEFERANDO,
+    "uber" to Service.UBER_EATS, "wolt" to Service.WOLT, "toogoodtogo" to Service.TGTG, "neotaste" to Service.NEOTASTE,
+    "amazon" to Service.LIEFERANDO,
+)
+
+/** Shared per-mail logic. [fromStr] must be lowercase. Returns true if a voucher was found. */
+fun processMail(prefs: Prefs, fromStr: String, subject: String, body: String, at: Long, notes: MutableList<String>): Boolean {
+    if (fromStr.contains("amazon") && !subject.contains("lieferando", true) && !subject.contains("just eat", true)) return false
+    val service = mailSenders.entries.firstOrNull { fromStr.contains(it.key) }?.value ?: return false
+    if (service == Service.UBER_EATS && !fromStr.contains("eats") && !subject.contains("eats", true)) return false
+    Signals.applyMembership(prefs, service, subject, body, at, "E-Mail")?.let { notes += it }
+    val v = Signals.voucherFrom(service, subject, body, at, DealOrigin.EMAIL) ?: return false
+    Signals.addVoucher(prefs, v)
+    return true
+}
+
 class MailScanner(private val prefs: Prefs) {
-    private val senders = mapOf(
-        "lieferando" to Service.LIEFERANDO, "just-eat" to Service.LIEFERANDO, "takeaway" to Service.LIEFERANDO,
-        "uber" to Service.UBER_EATS, "wolt" to Service.WOLT, "toogoodtogo" to Service.TGTG, "neotaste" to Service.NEOTASTE,
-        "amazon" to Service.LIEFERANDO,
-    )
+    private val senders = mailSenders
 
     data class ScanResult(val messages: Int, val vouchers: Int, val membershipNotes: List<String>)
 
@@ -64,13 +77,9 @@ class MailScanner(private val prefs: Prefs) {
                 count++
                 val fromStr = msg.from?.joinToString { it.toString() }?.lowercase() ?: ""
                 val subject = msg.subject ?: ""
-                if (fromStr.contains("amazon") && !subject.contains("lieferando", true) && !subject.contains("just eat", true)) continue
-                val service = senders.entries.firstOrNull { fromStr.contains(it.key) }?.value ?: continue
-                if (service == Service.UBER_EATS && !fromStr.contains("eats") && !subject.contains("eats", true)) continue
                 val body = runCatching { text(msg) }.getOrDefault("").take(20_000)
                 val at = (msg.receivedDate ?: msg.sentDate ?: Date()).time
-                Signals.applyMembership(prefs, service, subject, body, at, "E-Mail")?.let { notes += it }
-                Signals.voucherFrom(service, subject, body, at, DealOrigin.EMAIL)?.let { Signals.addVoucher(prefs, it); found++ }
+                if (processMail(prefs, fromStr, subject, body, at, notes)) found++
             }
             inbox.close(false)
         } finally {
@@ -93,11 +102,13 @@ class MailScanner(private val prefs: Prefs) {
         else -> ""
     }
 
-    private fun html(s: String) = s
+    private fun html(s: String) = htmlToText(s)
+}
+
+internal fun htmlToText(s: String) = s
         .replace(Regex("(?is)<(script|style)[^>]*>.*?</\\1>"), " ")
         .replace(Regex("(?i)<br\\s*/?>|</p>|</div>|</td>|</tr>"), "\n")
         .replace(Regex("<[^>]+>"), " ")
         .replace("&nbsp;", " ").replace("&amp;", "&").replace("&euro;", "€").replace("&#8364;", "€")
         .replace(Regex("&[a-z]+;"), " ")
         .replace(Regex("[ \\t]+"), " ")
-}

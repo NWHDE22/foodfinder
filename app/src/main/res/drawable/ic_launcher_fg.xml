@@ -1,12 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Authored vector: chalk price tag with a struck-through stroke. Origin: hand-written for FoodFinder. -->
+<!-- Authored vector for FoodFinder (hand-written for this project): a footprint made of pizza.
+     Sole = cheese with a crust rim and salami dots, toes = little dough balls. A pun on "Feet" -> "Food". -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#F2D46B"
-        android:pathData="M36,34 L62,34 L76,48 L76,74 L36,74 Z" />
-    <path android:fillColor="#18211E"
-        android:pathData="M62,42 a4,4 0 1,0 0.1,0 Z" />
-    <path android:strokeColor="#18211E" android:strokeWidth="4" android:strokeLineCap="round"
-        android:pathData="M44,62 L68,54" />
+    <group android:scaleX="0.82" android:scaleY="0.82" android:pivotX="54" android:pivotY="54" android:translateX="-4" android:translateY="3">
+    <!-- sole: cheese with crust rim -->
+    <path android:fillColor="#F2D46B" android:strokeColor="#C99A3A" android:strokeWidth="3"
+        android:pathData="M49,47 C41,52 39,64 42,74 C44,82 49,88 56,88 C63,88 66,82 65,75 C64,69 65,64 69,58 C73,52 71,44 63,43 C57,42 53,44 49,47 Z" />
+    <!-- salami -->
+    <path android:fillColor="#D9625B" android:pathData="M51,57 m-3.6,0 a3.6,3.6 0 1,0 7.2,0 a3.6,3.6 0 1,0 -7.2,0" />
+    <path android:fillColor="#D9625B" android:pathData="M61,53 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+    <path android:fillColor="#D9625B" android:pathData="M48,70 m-3.2,0 a3.2,3.2 0 1,0 6.4,0 a3.2,3.2 0 1,0 -6.4,0" />
+    <path android:fillColor="#D9625B" android:pathData="M58,64 m-3.4,0 a3.4,3.4 0 1,0 6.8,0 a3.4,3.4 0 1,0 -6.8,0" />
+    <path android:fillColor="#D9625B" android:pathData="M56,79 m-3.2,0 a3.2,3.2 0 1,0 6.4,0 a3.2,3.2 0 1,0 -6.4,0" />
+    <!-- basil leaf -->
+    <path android:fillColor="#8FD3B4" android:pathData="M45,62 C47,59 51,60 52,62 C50,64 47,64 45,62 Z" />
+    <!-- toes: dough balls, big toe first -->
+    <path android:fillColor="#F2D46B" android:strokeColor="#C99A3A" android:strokeWidth="2.5"
+        android:pathData="M45,35 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+    <path android:fillColor="#F2D46B" android:strokeColor="#C99A3A" android:strokeWidth="2.5"
+        android:pathData="M56,30.5 m-4.4,0 a4.4,4.4 0 1,0 8.8,0 a4.4,4.4 0 1,0 -8.8,0" />
+    <path android:fillColor="#F2D46B" android:strokeColor="#C99A3A" android:strokeWidth="2.5"
+        android:pathData="M65,32 m-3.8,0 a3.8,3.8 0 1,0 7.6,0 a3.8,3.8 0 1,0 -7.6,0" />
+    <path android:fillColor="#F2D46B" android:strokeColor="#C99A3A" android:strokeWidth="2.5"
+        android:pathData="M72,37 m-3.3,0 a3.3,3.3 0 1,0 6.6,0 a3.3,3.3 0 1,0 -6.6,0" />
+    <path android:fillColor="#F2D46B" android:strokeColor="#C99A3A" android:strokeWidth="2.5"
+        android:pathData="M76,44.5 m-2.8,0 a2.8,2.8 0 1,0 5.6,0 a2.8,2.8 0 1,0 -5.6,0" />
+    </group>
 </vector>

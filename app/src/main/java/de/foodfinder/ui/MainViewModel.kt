@@ -3,6 +3,8 @@ package de.foodfinder.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import de.foodfinder.data.Diet
+import de.foodfinder.data.DietCheck
 import de.foodfinder.data.Estimate
 import de.foodfinder.data.Filters
 import de.foodfinder.data.MenuItem
@@ -14,6 +16,8 @@ import de.foodfinder.data.Savings
 import de.foodfinder.data.SourceStatus
 import de.foodfinder.data.Venue
 import de.foodfinder.data.sources.Where
+import de.foodfinder.mail.GmailAuth
+import de.foodfinder.mail.GmailScanner
 import de.foodfinder.mail.MailScanner
 import de.foodfinder.notify.DealWorker
 import kotlinx.coroutines.Job
@@ -50,7 +54,7 @@ data class UiState(
     fun of(m: Mode) = if (m == Mode.DELIVERY) delivery else pickup
 }
 
-data class DetailState(val venue: Venue, val items: List<MenuItem>? = null, val loading: Boolean = false, val error: String? = null, val estimate: Estimate)
+data class DetailState(val venue: Venue, val items: List<MenuItem>? = null, val loading: Boolean = false, val error: String? = null, val estimate: Estimate, val diet: Diet = Diet.ANY)
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     val repo = Repository(app)
@@ -87,15 +91,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             updateMode(m) { it.copy(venues = res.venues, status = res.status, loading = false, loadedAt = System.currentTimeMillis(), at = at) }
             rerank(m)
             // enrich top candidates with real menus so item discounts become exact
+            enrichMenus(m)
+        }
+    }
+
+    /** Load menus of the most promising venues. With a diet filter the leaders are taken from the unfiltered ranking and more menus are checked. */
+    private suspend fun enrichMenus(m: Mode) {
+            val s0 = _state.value
+            val diet = s0.filters.diet
+            val base = if (diet == Diet.ANY) s0.of(m).ranked.map { it.venue }
+                else repo.rank(s0.of(m).venues, s0.persons, s0.filters.copy(diet = Diet.ANY, onlyWithDeals = false), s0.query).map { it.venue }
             updateMode(m) { it.copy(enriching = true) }
             var last = 0L
-            repo.enrich(_state.value.of(m).ranked.map { it.venue }) {
+            repo.enrich(base, limit = if (diet == Diet.ANY) 16 else 35) {
                 val now = System.currentTimeMillis()
                 if (now - last > 700) { last = now; rerank(m) }
             }
             rerank(m)
             updateMode(m) { it.copy(enriching = false) }
-        }
     }
 
     private fun updateMode(m: Mode, f: (ModeState) -> ModeState) = _state.update {
@@ -124,10 +137,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setFilters(f: Filters) {
         val servicesChanged = f.services != _state.value.filters.services
+        val dietChanged = f.diet != _state.value.filters.diet
         p.filters = f
         _state.update { it.copy(filters = f) }
         Mode.entries.forEach(::rerank)
         if (servicesChanged) refresh(_state.value.mode, force = true)
+        else if (dietChanged && f.diet != Diet.ANY) {
+            val m = _state.value.mode
+            jobs[m]?.cancel()
+            jobs[m] = viewModelScope.launch { enrichMenus(m) }
+        }
     }
 
     fun setPersons(n: Int) {
@@ -169,8 +188,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val v = repo.merged(v0)
         val s = _state.value
         val cached = repo.cachedMenu(v)
+        val diet = s.filters.diet
+        fun calcItems(items: List<MenuItem>?) = if (diet == Diet.ANY || items == null) items else items.filter { DietCheck.matches(it, diet) }
         _detail.value = DetailState(v, cached, loading = cached == null && v.service.name in setOf("WOLT", "UBER_EATS", "LIEFERANDO"),
-            estimate = Savings.estimate(v, s.persons, p.membership, repo.activeVouchers(), cached))
+            estimate = Savings.estimate(v, s.persons, p.membership, repo.activeVouchers(), calcItems(cached)), diet = diet)
         if (cached == null && _detail.value!!.loading) viewModelScope.launch {
             val dv = repo.details(v)
             val r = runCatching { repo.menu(dv) }
@@ -178,7 +199,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _detail.update { d ->
                 if (d?.venue?.uid != v.uid) d else d.copy(venue = dv, items = items ?: emptyList(), loading = false,
                     error = r.exceptionOrNull()?.let { "Speisekarte nicht geladen: ${it.message}" },
-                    estimate = Savings.estimate(dv, _state.value.persons, p.membership, repo.activeVouchers(), items))
+                    estimate = Savings.estimate(dv, _state.value.persons, p.membership, repo.activeVouchers(), calcItems(items)))
             }
             rerank(v.mode)
         }
@@ -188,8 +209,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun membershipChanged() { Mode.entries.forEach(::rerank) }
 
-    fun scanMail(onDone: (String) -> Unit) = viewModelScope.launch {
-        val r = runCatching { MailScanner(p).scan() }
+    val gmailAuth = GmailAuth(app, p)
+
+    /** Browser sign-in, then a first scan; [onDone] gets German status messages (intermediate one ends with an ellipsis). */
+    fun gmailSignIn(onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            val r = runCatching { gmailAuth.signIn(getApplication()) }
+            r.onFailure { onDone(it.message ?: "Anmeldung fehlgeschlagen"); return@launch }
+            onDone("Verbunden mit ${r.getOrNull()} - Postfach wird gelesen…")
+            scanMail(onDone).join()
+        }
+    }
+
+    fun gmailSignOut() { gmailAuth.signOut() }
+
+    fun scanMail(onDone: (String) -> Unit): Job = viewModelScope.launch {
+        val r = runCatching { if (p.gmailConfigured) GmailScanner(p, gmailAuth).scan() else MailScanner(p).scan() }
         val msg = r.fold({ "${it.messages} Mails geprüft · ${it.vouchers} Angebote" + if (it.membershipNotes.isNotEmpty()) " · " + it.membershipNotes.distinct().joinToString() else "" },
             { "Mail-Abruf fehlgeschlagen: ${it.message}" })
         onDone(msg)

@@ -70,7 +70,13 @@ class Repository(ctx: Context) {
                 s to runCatching { withTimeout(35_000) { sources.getValue(s).list(mode, at) } }
             }
         }
-        val results = jobs.awaitAll()
+        val results = jobs.awaitAll().map { (s, r) ->
+            // Too Good To Go blocks third-party apps at times; fall back to the bags its own app announced by push
+            if (s == Service.TGTG && r.isFailure) {
+                val push = tgtgFromPushes(at)
+                if (push.isNotEmpty()) s to kotlin.Result.success(push) else s to r
+            } else s to r
+        }
         val venues = results.flatMap { it.second.getOrDefault(emptyList()) }
         val status = results.map { (s, r) ->
             SourceStatus(s, r.isSuccess, r.getOrNull()?.size ?: 0, r.exceptionOrNull()?.let(::friendly))
@@ -78,9 +84,23 @@ class Repository(ctx: Context) {
         LoadResult(venues, status, at)
     }
 
+    private fun tgtgFromPushes(at: Where): List<Venue> {
+        val since = System.currentTimeMillis() - 6 * 3600_000L
+        return prefs.tgtgPushes.filter { it.at > since }.map { n ->
+            Venue(
+                id = "push-${n.at}", service = Service.TGTG, mode = Mode.PICKUP,
+                name = n.title.ifBlank { "Too Good To Go" },
+                deals = listOf(Deal(DealKind.OTHER, n.text.take(140), origin = DealOrigin.PUSH)),
+                url = "https://www.toogoodtogo.com/de",
+                pickupWindow = java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(n.at).let { "gemeldet $it" },
+                key = "push",
+            )
+        }
+    }
+
     private fun friendly(e: Throwable): String = when (e) {
         is Http.HttpError -> when (e.code) {
-            403, 429 -> "Vom Dienst blockiert (${e.code}), später erneut"
+            403, 429 -> e.message?.takeIf { it.length > 12 } ?: "Vom Dienst blockiert (${e.code}), später erneut"
             404 -> "Nicht verfügbar an diesem Ort"
             else -> e.message ?: "Fehler"
         }
@@ -148,9 +168,10 @@ class Repository(ctx: Context) {
             .filter { filters.maxMinOrder == null || (it.minOrder ?: 0.0) <= filters.maxMinOrder }
             .filter { filters.maxDeliveryFee == null || (it.deliveryFee ?: 0.0) <= filters.maxDeliveryFee }
             .filter { filters.minRating == null || (it.rating ?: 0.0) >= filters.minRating }
-            .filter { q.isEmpty() || matches(it, q) }
             .map { merged(it) }
-            .map { Ranked(it, Savings.estimate(it, persons, membership, vouchers, cachedMenu(it))) }
+            .mapNotNull { v -> dietView(v, filters.diet) }
+            .filter { (v, items) -> q.isEmpty() || matches(v, q, items) }
+            .map { (v, items) -> Ranked(v, Savings.estimate(v, persons, membership, vouchers, items)) }
             .filter { !filters.onlyWithDeals || it.estimate.savings > 0.01 }
             .sortedWith(
                 when (filters.sort) {
@@ -164,13 +185,32 @@ class Repository(ctx: Context) {
             .toList()
     }
 
-    private fun matches(v: Venue, q: String): Boolean {
+    /**
+     * With a diet filter only dishes count, not the restaurant's type: a venue stays only if its checked menu
+     * has matching main dishes, and the estimate is then built from those dishes.
+     * Returns the venue plus the menu items to calculate with (null = menu not loaded, estimate as usual).
+     */
+    private fun dietView(v: Venue, diet: Diet): Pair<Venue, List<MenuItem>?>? {
+        val menu = cachedMenu(v)
+        if (diet == Diet.ANY) return v to menu
+        return when (v.service) {
+            Service.TGTG, Service.NEOTASTE -> if (DietCheck.tagsMatch(v.dietTags, diet)) v to null else null
+            else -> {
+                val dishes = menu?.filter { DietCheck.matches(it, diet) } ?: return null
+                if (dishes.none(Savings::isMain)) null else v to dishes
+            }
+        }
+    }
+
+    fun checkedMenus(venues: List<Venue>) = venues.count { cachedMenu(it) != null }
+
+    private fun matches(v: Venue, q: String, items: List<MenuItem>?): Boolean {
         val words = Synonyms.expand(q)
         val hay = buildString {
             append(v.name.lowercase()); append(' ')
             v.cuisines.forEach { append(it.lowercase()); append(' ') }
             v.previewItems.forEach { append(it.name.lowercase()); append(' ') }
-            cachedMenu(v)?.take(200)?.forEach { append(it.name.lowercase()); append(' ') }
+            (items ?: cachedMenu(v))?.take(300)?.forEach { append(it.name.lowercase()); append(' ') }
         }
         return words.any { hay.contains(it) }
     }

@@ -1,9 +1,17 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
 }
+
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun buildConfigString(v: String?) = "\"" + (v ?: "").replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
     namespace = "de.foodfinder"
@@ -13,8 +21,10 @@ android {
         applicationId = "de.foodfinder"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+        buildConfigField("String", "GOOGLE_CLIENT_ID", buildConfigString(localProps.getProperty("google.clientId")))
+        buildConfigField("String", "GOOGLE_CLIENT_SECRET", buildConfigString(localProps.getProperty("google.clientSecret")))
     }
 
     buildTypes {
@@ -30,7 +40,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     packaging {
         resources {
             excludes += setOf("META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/*.md", "META-INF/mailcap*", "META-INF/javamail*")

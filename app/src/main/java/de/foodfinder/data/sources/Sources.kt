@@ -120,7 +120,11 @@ object WoltSource : Source {
         return j["items"].arr.mapNotNull { i ->
             val price = i["price"].dbl ?: return@mapNotNull null
             val orig = i["original_price"].dbl
-            MenuItem(i["name"].str ?: "", price / 100.0, orig?.let { it / 100.0 }, i["description"].str ?: "", cats[i["id"].str] ?: "")
+            val labels = buildList {
+                i["dietary_preferences"].forEachString({ _, t -> add(t) })
+                i["tags"].arr.forEach { t -> (t["label"].str ?: t["id"].str)?.let(::add) }
+            }.filter { it.contains("veg", true) }
+            MenuItem(i["name"].str ?: "", price / 100.0, orig?.let { it / 100.0 }, i["description"].str ?: "", cats[i["id"].str] ?: "", labels)
         }
     }
 }
@@ -189,18 +193,24 @@ object LieferandoSource : Source {
     }
 
     override suspend fun menu(v: Venue): List<MenuItem> {
+        // small CDN file (~100 KB) first; the full menu page (~2 MB) only as fallback
+        runCatching {
+            val j = Http.parse(Http.get("https://globalmenucdn.eu-central-1.production.jet-external.com/${v.key}_de_items.json"))
+            val items = j["Items"].arr.mapNotNull { it ->
+                val price = it["Variations"].arr.firstOrNull()?.get("BasePrice").dbl ?: return@mapNotNull null
+                MenuItem(it["Name"].str ?: "", price, null, it["Description"].str ?: "", "", it["Labels"].arr.mapNotNull { l -> l.str })
+            }
+            if (items.isNotEmpty()) return items
+        }
         val html = Http.get(v.url)
         val m = Regex("""<script id="__NEXT_DATA__"[^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL).find(html) ?: return emptyList()
         val j = Http.parse(m.groupValues[1])
         val r = j["props"]["appProps"]["preloadedState"]["menu"]["restaurant"]
         val items = r["cdn"]["items"].obj ?: return emptyList()
         return items.values.mapNotNull { it ->
-            val vars = it["variations"].arr
-            val first = vars.firstOrNull() ?: return@mapNotNull null
+            val first = it["variations"].arr.firstOrNull() ?: return@mapNotNull null
             val price = first["basePrice"].dbl ?: return@mapNotNull null
-            var orig: Double? = null
-            first.obj?.forEach { (k, value) -> if ((k.contains("original", true) || k.contains("before", true)) && value.dbl != null) orig = value.dbl }
-            MenuItem(it["name"].str ?: "", price, orig?.takeIf { o -> o > price }, it["description"].str ?: "")
+            MenuItem(it["name"].str ?: "", price, null, it["description"].str ?: "", "", it["labels"].arr.mapNotNull { l -> l.str })
         }
     }
 }
@@ -285,7 +295,9 @@ object UberSource : Source {
                     val orig0 = Regex("""(?:discounted from|statt|reduziert von)\s*([\d.,]+)\s?€""").find(acc)?.groupValues?.get(1)
                         ?.replace(".", "")?.replace(',', '.')?.toDoubleOrNull()
                     val orig = orig0 ?: struck?.replace(".", "")?.replace(',', '.')?.toDoubleOrNull()
-                    out += MenuItem(it["title"].str ?: "", price / 100.0, orig, it["itemDescription"].str ?: "", cat)
+                    val badge = it["titleBadge"]["accessibilityText"].str ?: ""
+                    val labels = listOfNotNull("VEGAN".takeIf { badge.contains("VEGAN") }, "VEGETARIAN".takeIf { badge.contains("VEGETARIAN") })
+                    out += MenuItem(it["title"].str ?: "", price / 100.0, orig, it["itemDescription"].str ?: "", cat, labels)
                 }
             }
         }
@@ -370,6 +382,9 @@ object NeoTasteSource : Source {
             val where = if (d["locationCondition"].str == "onSite") " · vor Ort" else " · Abholung"
             Deal(DealKind.FIXED_VALUE, name + where, amount = value)
         }
+        val dealText = r["deals"].arr.joinToString(" ") { (it["name"].str ?: "") + " " + (it["conditions"].str ?: "") }
+        val dietTags = listOfNotNull("VEGAN".takeIf { dealText.contains("vegan", true) },
+            "VEGETARIAN".takeIf { Regex("(?i)vegetar|veggie|vegan").containsMatchIn(dealText) })
         if (deals.isEmpty()) return null
         val city = r["citySlug"].str ?: "berlin"
         return Venue(
@@ -379,7 +394,7 @@ object NeoTasteSource : Source {
             distanceM = if (lat != null && lon != null) haversineM(at.lat, at.lon, lat, lon) else null,
             priceLevel = r["priceRange"].int, deals = deals,
             url = "https://neotaste.com/de/restaurants/$city/${r["slug"].str}",
-            lat = lat, lon = lon, address = r["neighborhood"].str, key = r["slug"].str ?: uuid,
+            lat = lat, lon = lon, address = r["neighborhood"].str, key = r["slug"].str ?: uuid, dietTags = dietTags,
             isOpen = r["isActive"].bool != false,
         )
     }
@@ -395,7 +410,7 @@ class TgtgSource(private val auth: TgtgAuth) : Source {
         val body = """{"user_id":"${auth.userId ?: ""}","origin":{"latitude":${at.lat},"longitude":${at.lon}},"radius":5,"page_size":100,"page":1,"discover":false,"favorites_only":false,"item_categories":[],"diet_categories":[],"pickup_earliest":null,"pickup_latest":null,"search_phrase":null,"with_stock_only":true,"hidden_only":false,"we_care_only":false}"""
         val (code, text) = Http.post(TgtgAuth.BASE + "item/v8/", body, auth.headers(token))
         if (code == 401) { auth.invalidate(); throw IllegalStateException("Anmeldung abgelaufen") }
-        if (code != 200) throw Http.HttpError(code, if (code == 403) "Blockiert (403) – später erneut" else "HTTP $code")
+        if (code != 200) throw Http.HttpError(code, if (code == 403) "TGTG sperrt Dritt-Apps gerade (Bot-Schutz)" else "HTTP $code")
         return Http.parse(text)["items"].arr.mapNotNull { e ->
             val item = e["item"]
             val id = item["item_id"].str ?: return@mapNotNull null
@@ -425,6 +440,7 @@ class TgtgSource(private val auth: TgtgAuth) : Source {
                 address = store["store_location"]["address"]["address_line"].str,
                 key = id,
                 deals = listOf(Deal(DealKind.SURPRISE_BAG, "Überraschungstüte")),
+                dietTags = item["diet_categories"].arr.mapNotNull { it.str },
             )
         }
     }
@@ -455,7 +471,7 @@ class TgtgAuth(private val store: de.foodfinder.data.Prefs) {
     /** Step 1: request login mail. Returns polling id. */
     suspend fun requestLogin(email: String): String {
         val (code, text) = Http.post(BASE + "auth/v5/authByEmail", """{"device_type":"ANDROID","email":"$email"}""", headers())
-        if (code != 200) throw Http.HttpError(code, if (code == 403) "TGTG blockiert die Anfrage (403). Später erneut versuchen." else "HTTP $code")
+        if (code != 200) throw Http.HttpError(code, if (code == 403) "Too Good To Go sperrt gerade Zugriffe von Dritt-Apps (Bot-Schutz). FoodFinder umgeht das nicht. Tüten aus TGTG-Benachrichtigungen erscheinen trotzdem unter „Abholen“." else "HTTP $code")
         val j = Http.parse(text)
         if (j["state"].str == "TERMS") throw IllegalStateException("Für diese E-Mail gibt es noch kein TGTG-Konto")
         store.tgtgEmail = email

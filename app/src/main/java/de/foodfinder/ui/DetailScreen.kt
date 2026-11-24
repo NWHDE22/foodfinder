@@ -42,6 +42,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.foodfinder.data.DealOrigin
+import de.foodfinder.data.Diet
+import de.foodfinder.data.DietCheck
 import de.foodfinder.data.Mode
 import de.foodfinder.data.Savings
 import de.foodfinder.data.Service
@@ -147,7 +149,12 @@ fun DetailScreen(d: DetailState, persons: Int, onPersons: (Int) -> Unit, onBack:
             // ---- discounted products
             val items = d.items
             if (items != null) {
-                val disc = items.filter { it.discounted }.sortedByDescending { it.saving }
+                val dietItems = if (d.diet == Diet.ANY) items else items.filter { DietCheck.matches(it, d.diet) }
+                if (d.diet != Diet.ANY) {
+                    item { Section("${d.diet.label}e Gerichte (${dietItems.size})") }
+                    items(dietItems.sortedBy { it.price }.take(30)) { ProductRow(it.name, it.description, it.price, it.originalPrice.takeIf { _ -> it.discounted }) }
+                }
+                val disc = dietItems.filter { it.discounted }.sortedByDescending { it.saving }
                 item { Section(if (disc.isEmpty()) "Reduzierte Produkte" else "Reduzierte Produkte (${disc.size})") }
                 if (disc.isEmpty()) item {
                     Text(if (v.deals.any { it.kind.name.startsWith("ITEM") }) "Der Dienst zeigt die reduzierten Produkte nur in der App. Öffne die Speisekarte, um sie zu sehen." else "Keine einzeln reduzierten Produkte gefunden.",
@@ -155,7 +162,7 @@ fun DetailScreen(d: DetailState, persons: Int, onPersons: (Int) -> Unit, onBack:
                 }
                 items(disc.take(40)) { it -> ProductRow(it.name, it.description, it.price, it.originalPrice) }
                 val mains = items.filter { Savings.isMain(it) && !it.discounted }.sortedBy { it.price }.take(6)
-                if (mains.isNotEmpty()) {
+                if (mains.isNotEmpty() && d.diet == Diet.ANY) {
                     item { Section("Günstige Hauptgerichte") }
                     items(mains) { ProductRow(it.name, it.description, it.price, null) }
                 }

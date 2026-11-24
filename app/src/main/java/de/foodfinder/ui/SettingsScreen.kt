@@ -104,11 +104,43 @@ fun SettingsScreen(vm: MainViewModel) {
             Divider()
             // ---------------- e-mail
             Heading("Angebote aus E-Mails")
+            var gmId by remember { mutableStateOf(p.gmailClientId) }
+            var gmSecret by remember { mutableStateOf(p.gmailClientSecret) }
+            var mailMsg by remember { mutableStateOf(p.imapLastResult) }
+            var scanning by remember { mutableStateOf(false) }
+            if (p.gmailConfigured) {
+                Text("Verbunden mit ${p.gmailAccount ?: "Google"}", style = MaterialTheme.typography.bodyMedium, color = acc.ok)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                    Button(onClick = { scanning = true; mailMsg = "Postfach wird gelesen…"; vm.scanMail { mailMsg = it; scanning = false; tick++ } }, enabled = !scanning) { Text("Jetzt scannen") }
+                    OutlinedButton(onClick = { vm.gmailSignOut(); mailMsg = "Abgemeldet"; tick++ }) { Text("Abmelden") }
+                }
+            } else {
+                Button(onClick = {
+                    scanning = true; mailMsg = "Anmeldung im Browser…"
+                    vm.gmailSignIn { mailMsg = it; if (!it.endsWith("…")) scanning = false; tick++ }
+                }, enabled = !scanning && gmId.isNotBlank() && gmSecret.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Mit Google anmelden (Gmail)") }
+            }
+            var gmSetup by remember { mutableStateOf(!p.gmailConfigured && (gmId.isBlank() || gmSecret.isBlank())) }
+            TextButton(onClick = { gmSetup = !gmSetup }) { Text(if (gmSetup) "Google-Zugang einrichten (einmalig) \u25B2" else "Google-Zugang einrichten (einmalig) \u25BC") }
+            if (gmSetup) {
+                OutlinedTextField(gmId, { gmId = it.trim(); p.gmailClientId = gmId }, label = { Text("Client-ID") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(gmSecret, { gmSecret = it.trim(); p.gmailClientSecret = gmSecret }, label = { Text("Client-Secret") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Text("1) console.cloud.google.com \u2192 neues Projekt anlegen.\n" +
+                    "2) \u201EGmail API\u201C aktivieren.\n" +
+                    "3) OAuth-Zustimmungsbildschirm: Extern, eigene Adresse als Testnutzer eintragen, danach \u201EApp ver\u00F6ffentlichen\u201C (sonst l\u00E4uft die Anmeldung nach 7 Tagen ab; Google zeigt dann den Hinweis \u201Enicht \u00FCberpr\u00FCfte App\u201C \u2013 \u00FCber \u201EErweitert\u201C fortfahren).\n" +
+                    "4) Anmeldedaten \u2192 OAuth-Client-ID erstellen \u2192 Typ \u201EDesktop-App\u201C, Client-ID und Secret hier einf\u00FCgen.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
+                    OutlinedButton(onClick = { openUrl(ctx, "https://console.cloud.google.com/apis/library/gmail.googleapis.com") }) { Text("Gmail API") }
+                    OutlinedButton(onClick = { openUrl(ctx, "https://console.cloud.google.com/apis/credentials") }) { Text("Anmeldedaten") }
+                }
+            }
+            if (mailMsg.isNotBlank() && (p.gmailConfigured || scanning)) Text(mailMsg, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+
+            Text("Andere Anbieter (IMAP)", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp, bottom = 6.dp))
             var host by remember { mutableStateOf(p.imapHost) }
             var user by remember { mutableStateOf(p.imapUser) }
             var pwd by remember { mutableStateOf("") }
-            var mailMsg by remember { mutableStateOf(p.imapLastResult) }
-            var scanning by remember { mutableStateOf(false) }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 mailPresets.forEach { pr -> FilterChip(host == pr.host && pr.host.isNotEmpty(), { host = pr.host }, label = { Text(pr.label) }) }
             }

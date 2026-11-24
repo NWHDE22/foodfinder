@@ -53,6 +53,8 @@ data class MenuItem(
     val originalPrice: Double? = null,
     val description: String = "",
     val category: String = "",
+    /** explicit diet labels from the service (e.g. "vegetarian", "VEGAN") */
+    val labels: List<String> = emptyList(),
 ) {
     val discounted: Boolean get() = originalPrice != null && originalPrice > price + 0.009
     val saving: Double get() = if (discounted) originalPrice!! - price else 0.0
@@ -87,9 +89,14 @@ data class Venue(
     val bagValue: Double? = null,
     val address: String? = null,
     val key: String = "",
+    /** diet categories the service states for the whole offer (TGTG bags) */
+    val dietTags: List<String> = emptyList(),
 ) {
     val uid: String get() = "${service.name}:${mode.name}:$id"
 }
+
+@Serializable
+data class PushNote(val service: Service, val title: String, val text: String, val at: Long)
 
 @Serializable
 data class SavedPlace(val id: String, val name: String, val lat: Double, val lon: Double, val address: String = "")
@@ -132,7 +139,10 @@ data class Filters(
     val onlyWithDeals: Boolean = false,
     val hideGroceries: Boolean = true,
     val sort: SortBy = SortBy.SAVINGS,
+    val diet: Diet = Diet.ANY,
 )
+
+enum class Diet(val label: String) { ANY("Alles"), VEGETARIAN("Vegetarisch"), VEGAN("Vegan") }
 
 enum class SortBy(val label: String) { SAVINGS("Ersparnis"), TOTAL("Gesamtpreis"), ETA("Lieferzeit"), DISTANCE("Entfernung"), RATING("Bewertung") }
 

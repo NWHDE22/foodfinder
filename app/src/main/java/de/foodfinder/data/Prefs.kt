@@ -65,6 +65,11 @@ class Prefs(ctx: Context) {
         get() = getJson("vouchers", ListSerializer(Voucher.serializer()), emptyList())
         set(v) = putJson("vouchers", ListSerializer(Voucher.serializer()), v.sortedByDescending { it.receivedAt }.take(80))
 
+    /** Recent push notifications of Too Good To Go (shown when its API blocks third-party apps). */
+    var tgtgPushes: List<PushNote>
+        get() = getJson("tgtgPushes", ListSerializer(PushNote.serializer()), emptyList())
+        set(v) = putJson("tgtgPushes", ListSerializer(PushNote.serializer()), v.sortedByDescending { it.at }.take(30))
+
     /** uid -> last notified time */
     var notified: Map<String, Long>
         get() = getJson("notified", MapSerializer(String.serializer(), Long.serializer()), emptyMap())
@@ -104,6 +109,28 @@ class Prefs(ctx: Context) {
         get() = sp.getString("imapResult", "") ?: ""
         set(v) = sp.edit().putString("imapResult", v).apply()
     val imapConfigured get() = imapHost.isNotBlank() && imapUser.isNotBlank() && imapPassword.isNotBlank()
+
+    // Gmail (OAuth)
+    var gmailClientId: String
+        get() = (sp.getString("gmClientId", null) ?: "").ifBlank { de.foodfinder.BuildConfig.GOOGLE_CLIENT_ID }
+        set(v) = sp.edit().putString("gmClientId", v.trim()).apply()
+    var gmailClientSecret: String
+        get() = sp.getString("gmClientSecret", null)?.let { Crypto.decrypt(it) }?.takeIf { it.isNotBlank() } ?: de.foodfinder.BuildConfig.GOOGLE_CLIENT_SECRET
+        set(v) = sp.edit().putString("gmClientSecret", if (v.isBlank()) null else Crypto.encrypt(v.trim())).apply()
+    var gmailRefresh: String?
+        get() = sp.getString("gmRefresh", null)?.let { Crypto.decrypt(it) }
+        set(v) = sp.edit().putString("gmRefresh", v?.let { Crypto.encrypt(it) }).apply()
+    var gmailAccess: String?
+        get() = sp.getString("gmAccess", null)?.let { Crypto.decrypt(it) }
+        set(v) = sp.edit().putString("gmAccess", v?.let { Crypto.encrypt(it) }).apply()
+    var gmailAccessExp: Long
+        get() = sp.getLong("gmAccessExp", 0)
+        set(v) = sp.edit().putLong("gmAccessExp", v).apply()
+    var gmailAccount: String?
+        get() = sp.getString("gmAccount", null)
+        set(v) = sp.edit().putString("gmAccount", v).apply()
+    val gmailConfigured get() = gmailRefresh != null
+    val mailConfigured get() = imapConfigured || gmailConfigured
 
     // TGTG
     var tgtgEmail: String?

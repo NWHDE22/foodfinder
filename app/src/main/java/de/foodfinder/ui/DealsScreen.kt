@@ -22,6 +22,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Eco
+import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MyLocation
@@ -60,6 +62,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import de.foodfinder.data.Diet
 import de.foodfinder.data.Filters
 import de.foodfinder.data.Mode
 import de.foodfinder.data.Ranked
@@ -82,7 +85,7 @@ fun DealsScreen(vm: MainViewModel, state: UiState, mode: Mode, onPlaces: () -> U
         TopAppBar(
             title = {
                 Column {
-                    Text(if (mode == Mode.DELIVERY) "Liefern" else "Abholen & vor Ort", style = MaterialTheme.typography.titleLarge)
+                    Text(if (mode == Mode.DELIVERY) "Liefern" else "Abholen", style = MaterialTheme.typography.titleLarge)
                     Row(Modifier.clickable(onClick = onPlaces).padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(if (state.activePlaceId == null) Icons.Filled.MyLocation else Icons.Filled.Place, null,
                             Modifier.size(14.dp), tint = MaterialTheme.colorScheme.secondary)
@@ -135,6 +138,12 @@ fun DealsScreen(vm: MainViewModel, state: UiState, mode: Mode, onPlaces: () -> U
         PullToRefreshBox(isRefreshing = false, onRefresh = { vm.refresh(mode, force = true) }, modifier = Modifier.fillMaxSize()) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
                 item(key = "status") { SourceStrip(ms, mode) }
+                if (state.filters.diet != Diet.ANY) item(key = "diet") {
+                    Text("${state.filters.diet.label}: nur Restaurants mit passenden Gerichten auf der Speisekarte. " +
+                        "${vm.repo.checkedMenus(ms.venues)} Speisekarten geprüft" + if (ms.enriching) ", weitere werden geladen…" else ".",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
+                }
                 if (state.needsLocation && ms.at == null && !ms.loading) item(key = "noloc") {
                     EmptyBlock("Kein Standort", "Erlaube den Standortzugriff oder wähle unter „Orte“ einen gespeicherten Ort.", "Ort wählen", onPlaces)
                 } else if (!ms.loading && ms.ranked.isEmpty() && ms.loadedAt > 0) item(key = "empty") {
@@ -158,6 +167,10 @@ fun DealsScreen(vm: MainViewModel, state: UiState, mode: Mode, onPlaces: () -> U
 private fun QuickFilters(f: Filters, mode: Mode, onChange: (Filters) -> Unit, onMore: () -> Unit) {
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         item { AssistChip(onClick = onMore, label = { Text("Filter") }, leadingIcon = { Icon(Icons.Filled.Tune, null, Modifier.size(18.dp)) }) }
+        item { FilterChip(f.diet == Diet.VEGETARIAN, { onChange(f.copy(diet = if (f.diet == Diet.VEGETARIAN) Diet.ANY else Diet.VEGETARIAN)) }, label = { Text("Vegetarisch") },
+            leadingIcon = { Icon(Icons.Filled.Eco, null, Modifier.size(18.dp)) }) }
+        item { FilterChip(f.diet == Diet.VEGAN, { onChange(f.copy(diet = if (f.diet == Diet.VEGAN) Diet.ANY else Diet.VEGAN)) }, label = { Text("Vegan") },
+            leadingIcon = { Icon(Icons.Filled.Spa, null, Modifier.size(18.dp)) }) }
         item { FilterChip(f.onlyWithDeals, { onChange(f.copy(onlyWithDeals = !f.onlyWithDeals)) }, label = { Text("Nur mit Ersparnis") }) }
         if (mode == Mode.DELIVERY) {
             item { FilterChip(f.maxEta == 30, { onChange(f.copy(maxEta = if (f.maxEta == 30) null else 30)) }, label = { Text("bis 30 Min") }) }
@@ -249,6 +262,8 @@ private fun FilterSheet(f: Filters, mode: Mode, allCuisines: List<String>, onCha
                     }
                 }
             }
+            item { SheetHeading("Ernährung (geprüft je Gericht)") }
+            item { Options(Diet.entries.toList(), f.diet, { (it ?: Diet.ANY).label }) { onChange(f.copy(diet = it ?: Diet.ANY)) } }
             item { SheetHeading("Küche") }
             item {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -30,6 +30,8 @@ import de.foodfinder.data.Prefs
 import de.foodfinder.data.Repository
 import de.foodfinder.data.Service
 import de.foodfinder.data.eur
+import de.foodfinder.mail.GmailAuth
+import de.foodfinder.mail.GmailScanner
 import de.foodfinder.mail.MailScanner
 import de.foodfinder.mail.Signals
 import java.util.concurrent.TimeUnit
@@ -75,6 +77,8 @@ class DealListenerService : NotificationListenerService() {
         val text = listOfNotNull(ex.getCharSequence("android.bigText"), ex.getCharSequence("android.text")).joinToString(" ")
         if (title.isBlank() && text.isBlank()) return
         val prefs = Prefs(applicationContext)
+        if (service == Service.TGTG) prefs.tgtgPushes = prefs.tgtgPushes.filter { it.title != title || it.text != text } +
+            de.foodfinder.data.PushNote(service, title, text, sbn.postTime)
         Signals.applyMembership(prefs, service, title, text, sbn.postTime, "App-Push")
         Signals.voucherFrom(service, title, text, sbn.postTime, DealOrigin.PUSH)?.let { Signals.addVoucher(prefs, it) }
     }
@@ -85,7 +89,9 @@ class DealWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
         val repo = Repository(applicationContext)
         val p = repo.prefs
         // 1) mails
-        if (p.imapConfigured && System.currentTimeMillis() - p.imapLastScan > 50 * 60_000) runCatching { MailScanner(p).scan() }
+        if (p.mailConfigured && System.currentTimeMillis() - p.imapLastScan > 50 * 60_000) runCatching {
+            if (p.gmailConfigured) GmailScanner(p, GmailAuth(applicationContext, p)).scan() else MailScanner(p).scan()
+        }
         // 2) membership expiry reminder
         p.membership.woltPlusEnds?.let { end ->
             val left = end - System.currentTimeMillis()
