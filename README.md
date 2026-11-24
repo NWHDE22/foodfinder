@@ -144,7 +144,11 @@ Issues and pull requests are welcome. If a source stops working, please open an 
 
 ## License
 
-The code is released under the [GNU General Public License v3.0 or later](LICENSE) (`GPL-3.0-or-later`). The font Cabin Sketch (bundled from google/fonts) is licensed under the SIL Open Font License.
+Copyright (C) 2026 FoodFinder contributors.
+
+FoodFinder is free software: you can redistribute it and/or modify it under the terms of the [GNU General Public License v3.0](LICENSE) or (at your option) any later version (`GPL-3.0-or-later`). If you distribute a modified version, you must publish its source code under the same license. FoodFinder comes with ABSOLUTELY NO WARRANTY.
+
+The font Cabin Sketch (bundled from google/fonts) is licensed under the SIL Open Font License. Third-party libraries keep their own licenses (Apache 2.0 / EPL / CDDL / GPL with classpath exception).
 
 ---
 
@@ -220,4 +224,4 @@ FoodFinder ist ein unabhängiges Projekt und steht in keiner Verbindung zu Liefe
 
 ## Mitmachen und Lizenz
 
-Issues und Pull Requests sind willkommen. Der Code steht unter der [GNU General Public License v3.0 oder später](LICENSE) (`GPL-3.0-or-later`); die Schrift Cabin Sketch (aus google/fonts) unter der SIL Open Font License.
+Issues und Pull Requests sind willkommen. Der Code steht unter der [GNU General Public License v3.0](LICENSE) oder (nach Wahl) einer späteren Version (`GPL-3.0-or-later`): Wer eine veränderte Version weitergibt, muss deren Quellcode ebenfalls unter dieser Lizenz veröffentlichen. Ohne jede Gewährleistung. Die Schrift Cabin Sketch (aus google/fonts) steht unter der SIL Open Font License.
