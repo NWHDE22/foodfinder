@@ -1,0 +1,14 @@
+-keep class com.sun.mail.** { *; }
+-keep class javax.mail.** { *; }
+-keep class javax.activation.** { *; }
+-keep class com.sun.activation.** { *; }
+-dontwarn java.awt.**
+-dontwarn javax.security.**
+-dontwarn java.beans.**
+-dontwarn org.apache.harmony.**
+-dontwarn com.sun.**
+-dontwarn javax.**
+-keepattributes *Annotation*, InnerClasses
+-keep,includedescriptorclasses class de.foodfinder.**$$serializer { *; }
+-keepclassmembers class de.foodfinder.** { *** Companion; }
+-keepclasseswithmembers class de.foodfinder.** { kotlinx.serialization.KSerializer serializer(...); }

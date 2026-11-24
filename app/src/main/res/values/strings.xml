@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">FoodFinder</string>
+    <string name="listener_label">FoodFinder Angebots-Leser</string>
+</resources>

@@ -1,0 +1,11 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.impeccable/review/
+FoodFinder.apk
+.impeccable/questions/
+.impeccable/mocks/
+*.keystore
+*.jks
